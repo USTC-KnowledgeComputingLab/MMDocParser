@@ -8,7 +8,7 @@ pip imstall uv
 uv pip install .
 ```
 ## 测试doc_parsing
-1. 如果src没有message文件,那么请使用如下命令进行proto编译
+1. 如果src没有message文件夹,那么请使用如下命令进行proto编译
 ```
 python -m grpc_tools.protoc -Iproto --python_out=src/message --grpc_python_out=src/message proto/common/v1/s3.proto
 python -m grpc_tools.protoc -Iproto --python_out=src/message --grpc_python_out=src/message proto/parse/v1/pdf_parser.proto
