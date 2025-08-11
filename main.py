@@ -1,5 +1,5 @@
 def main():
-    print("Hello from trimodalparser!")
+    print("Hello from mmdocparser!")
 
 
 if __name__ == "__main__":

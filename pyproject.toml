@@ -1,21 +1,7 @@
 [project]
-name = "trimodalparser"
+name = "mmdocparser"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
-
-[dependency-groups]
-bandit = [
-    "bandit>=1.8.5",
-]
-mypy = [
-    "mypy>=1.16.1",
-]
-ruff = [
-    "ruff>=0.12.0",
-]
-secret = [
-    "secret>=0.8",
-]
