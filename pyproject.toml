@@ -1,11 +1,17 @@
+# pyproject.toml
 [project]
 name = "mmdocparser"
 version = "0.1.0"
-description = "Add your description here"
+description = "A document parsing service for extracting text, images, tables, and formulas"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
-
+dependencies = [
+    "sanic>=23.12.0",
+    "sanic-ext>=23.12.0",
+    "redis>=5.0.0",  # 使用 redis-py 而不是 aioredis
+    "aiohttp>=3.9.0",
+    "aiofiles>=23.2.1"
+]
 
 [dependency-groups]
 all-dev = [
@@ -17,6 +23,7 @@ all-dev = [
 dev = [
     "pytest>=8.4.1",
     "pytest-cov>=6.2.1",
+    "pytest-asyncio>=0.23.0",  # 添加异步测试支持
 ]
 lint = [
     "bandit>=1.8.6",
@@ -27,6 +34,26 @@ security = [
 ]
 typing = [
     "mypy>=1.17.1",
+]
+
+# 添加 pytest 配置
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+pythonpath = ["."]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests"
 ]
 
 [tool.bandit]
