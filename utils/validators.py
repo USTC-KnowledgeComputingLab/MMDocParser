@@ -72,12 +72,6 @@ def validate_upload_payload(payload: dict) -> dict:
         except ValidationError as e:
             raise ValidationError(f"文件 {file_info.get('name', 'unknown')} 验证失败") from e
 
-    # 验证其他参数
-    template_type = validate_template_type(payload.get("template_type", "化学"))
-    task_type = validate_task_type(payload.get("task_type", "document_analysis"))
-
     return {
-        "files": validated_files,
-        "template_type": template_type,
-        "task_type": task_type
+        "files": validated_files
     }

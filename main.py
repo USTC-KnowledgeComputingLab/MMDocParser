@@ -92,8 +92,6 @@ async def upload_documents(request: Request) -> HTTPResponse:
         # 4. 准备任务数据
         task_data = {
             "task_id": task_id,
-            "template_type": validated_data["template_type"],
-            "task_type": validated_data["task_type"],
             "presigned_urls": presigned_urls,
             "filenames": [filename for filename, _ in validated_data["files"]],
             "created_at": asyncio.get_event_loop().time()
