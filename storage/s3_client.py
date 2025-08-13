@@ -1,114 +1,122 @@
-# storage/s3_client.py
-import asyncio
-import aiohttp
-import hashlib
-import os
-import logging
-from typing import Tuple, List
+from contextlib import AsyncExitStack
+from datetime import timedelta
+from io import BytesIO
+from typing import Any, Protocol, Self, runtime_checkable
+import urllib.parse
 
-logger = logging.getLogger(__name__)
+from aiobotocore.session import AioSession
 
-class S3Error(Exception):
-    """S3操作异常"""
-    pass
+
+# ruff: noqa: N803
+@runtime_checkable
+class S3ClientProtocol(Protocol):
+    async def put_object(
+        self,
+        *,
+        Bucket: str | None,
+        Key: str,
+        Body: BytesIO,
+        ContentType: str
+    ) -> dict[str, Any]: ...
+
+    async def get_object(
+        self,
+        *,
+        Bucket: str | None,
+        Key: str
+    ) -> dict[str, Any]: ...
+
+    async def generate_presigned_url(
+        self,
+        ClientMethod: str,
+        Params: dict[str, str | None],
+        ExpiresIn: int
+    ) -> str: ...
+
+
+class S3ClientNotInitializedError(Exception):
+    """Raised when the S3 client is used before being initialized."""
+    def __init__(self) -> None:
+        super().__init__("S3 client not initialized")
+
 
 class AsyncS3Client:
-    """异步S3客户端 - 核心功能版本"""
-    
-    def __init__(self, endpoint_url: str, access_key: str, secret_key: str, 
-                 bucket: str, region: str):
-        self.endpoint_url = endpoint_url.rstrip('/')
+    def __init__(self,
+                 endpoint_url: str | None,
+                 access_key: str | None,
+                 secret_key: str | None,
+                 bucket: str | None,
+                 region: str = "us-east-1") -> None:
+        self.endpoint_url = endpoint_url
         self.access_key = access_key
         self.secret_key = secret_key
         self.bucket = bucket
         self.region = region
-        self.session = None
-        
-        # 验证配置
-        if not all([endpoint_url, access_key, secret_key, bucket]):
-            raise ValueError("所有S3配置参数都是必需的")
-    
-    async def __aenter__(self):
-        """异步上下文管理器入口"""
-        self.session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30),
-            headers={'User-Agent': 'MMDocParser-S3Client/1.0'}
+        self._stack = AsyncExitStack()
+        self._client: S3ClientProtocol | None = None
+
+    async def __aenter__(self) -> Self:
+        session = AioSession()
+        self._client = await self._stack.enter_async_context(
+            session.create_client(
+                "s3",
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name=self.region,
+            )
         )
         return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """异步上下文管理器出口"""
-        if self.session:
-            await self.session.close()
-    
+
+    async def __aexit__(self, *_: object) -> None:
+        await self._stack.aclose()
+
+    def _encode_filename(self, filename: str) -> str:
+        """对文件名进行URL编码，确保S3 key的安全性"""
+        return urllib.parse.quote(filename, safe='')
+
     async def upload_file(self, filename: str, content: bytes) -> str:
-        """上传文件到S3"""
-        try:
-            if not self.session:
-                raise S3Error("客户端未初始化，请使用异步上下文管理器")
-            
-            # 生成文件key
-            file_hash = hashlib.md5(content).hexdigest()
-            file_key = f"documents/{file_hash[:8]}/{filename}"
-            
-            # 构建上传URL
-            upload_url = f"{self.endpoint_url}/{self.bucket}/{file_key}"
-            
-            # 上传文件
-            response = await self.session.put(upload_url, data=content)
-            if response.status not in [200, 201]:
-                error_text = await response.text()
-                raise S3Error(f"上传失败: {response.status} - {error_text}")
-            
-            # 生成访问URL
-            access_url = f"{self.endpoint_url}/{self.bucket}/{file_key}"
-            
-            logger.info(f"文件 {filename} 已上传到 {access_url}")
-            return access_url
-            
-        except Exception as e:
-            logger.error(f"上传文件 {filename} 失败: {e}")
-            raise S3Error(f"上传文件失败: {e}")
-    
-    async def upload_files(self, files: List[Tuple[str, bytes]]) -> List[str]:
-        """批量上传文件"""
-        upload_tasks = [self.upload_file(filename, content) for filename, content in files]
-        return await asyncio.gather(*upload_tasks, return_exceptions=True)
-    
-    async def download_file(self, file_url: str) -> bytes:
-        """从S3下载文件"""
-        try:
-            if not self.session:
-                raise S3Error("客户端未初始化，请使用异步上下文管理器")
-            
-            response = await self.session.get(file_url)
-            if response.status == 200:
-                content = await response.read()
-                logger.info(f"文件下载成功: {file_url}, 大小: {len(content)} bytes")
-                return content
-            else:
-                error_text = await response.text()
-                raise S3Error(f"下载失败: {response.status} - {error_text}")
-                
-        except Exception as e:
-            logger.error(f"下载文件失败: {e}")
-            raise S3Error(f"下载文件失败: {e}")
-    
-    def _get_content_type(self, filename: str) -> str:
-        """根据文件扩展名获取内容类型"""
-        ext = os.path.splitext(filename)[1].lower()
+        """上传文件，使用编码后的文件名作为key"""
+        if self._client is None:
+            raise S3ClientNotInitializedError
         
-        content_types = {
-            '.pdf': 'application/pdf',
-            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            '.doc': 'application/msword',
-            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.txt': 'text/plain',
-        }
+        # 对文件名进行编码
+        encoded_key = self._encode_filename(filename)
         
-        return content_types.get(ext, 'application/octet-stream')
+        await self._client.put_object(
+            Bucket=self.bucket,
+            Key=encoded_key,
+            Body=BytesIO(content),
+            ContentType="application/octet-stream"
+        )
+        return await self.generate_presigned_url(encoded_key)
+
+    async def download_file(self, key: str) -> bytes:
+        """下载文件内容"""
+        if self._client is None:
+            raise S3ClientNotInitializedError
+        
+        response = await self._client.get_object(
+            Bucket=self.bucket,
+            Key=key
+        )
+        
+        # 读取文件内容
+        async with response['Body'] as stream:
+            content = await stream.read()
+        
+        return content
+
+    async def download_file_by_filename(self, filename: str) -> bytes:
+        """通过原始文件名下载文件"""
+        encoded_key = self._encode_filename(filename)
+        return await self.download_file(encoded_key)
+
+    async def generate_presigned_url(self, key: str, expires_days: int = 7) -> str:
+        if self._client is None:
+            raise S3ClientNotInitializedError
+        return await self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": key},
+            ExpiresIn=int(timedelta(days=expires_days).total_seconds())
+        )
