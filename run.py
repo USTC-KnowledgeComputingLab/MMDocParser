@@ -3,10 +3,10 @@
 MMDocParser 服务启动脚本
 """
 
-import asyncio
 import logging
-from main import app
+
 from config import settings
+from main import app
 
 if __name__ == "__main__":
     # 配置日志
@@ -14,7 +14,7 @@ if __name__ == "__main__":
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
+
     # 启动服务
     app.run(
         host=settings.HOST,
