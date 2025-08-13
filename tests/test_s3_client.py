@@ -1,212 +1,205 @@
-# tests/test_s3_client.py
 import pytest
-from unittest.mock import patch, AsyncMock
-from storage.s3_client import AsyncS3Client, S3Error
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from io import BytesIO
 
-pytestmark = pytest.mark.asyncio
+from storage.s3_client import (
+    AsyncS3Client,
+    S3ClientNotInitializedError,
+    S3ClientProtocol
+)
+
 
 class TestAsyncS3Client:
-    """S3客户端核心功能测试"""
-    
+    """测试AsyncS3Client类的功能"""
+
     @pytest.fixture
-    async def s3_client(self):
+    def s3_client(self):
         """创建S3客户端实例"""
-        client = AsyncS3Client(
+        return AsyncS3Client(
             endpoint_url="http://localhost:9000",
-            access_key="test_key",
-            secret_key="test_secret",
+            access_key="test_access_key",
+            secret_key="test_secret_key",
             bucket="test_bucket",
             region="us-east-1"
         )
-        return client
-    
-    async def test_init_validation(self):
-        """测试初始化参数验证"""
-        # 测试缺少参数
-        with pytest.raises(ValueError, match="所有S3配置参数都是必需的"):
-            AsyncS3Client("", "key", "secret", "bucket", "region")
-        
-        with pytest.raises(ValueError, match="所有S3配置参数都是必需的"):
-            AsyncS3Client("endpoint", "", "secret", "bucket", "region")
-    
+
+    @pytest.fixture
+    def mock_s3_client(self):
+        """创建模拟的S3客户端"""
+        mock_client = AsyncMock(spec=S3ClientProtocol)
+        mock_client.put_object = AsyncMock()
+        mock_client.get_object = AsyncMock()
+        mock_client.generate_presigned_url = AsyncMock(return_value="https://example.com/presigned_url")
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_init(self, s3_client):
+        """测试初始化"""
+        assert s3_client.endpoint_url == "http://localhost:9000"
+        assert s3_client.access_key == "test_access_key"
+        assert s3_client.secret_key == "test_secret_key"
+        assert s3_client.bucket == "test_bucket"
+        assert s3_client.region == "us-east-1"
+        assert s3_client._client is None
+
+    @pytest.mark.asyncio
     async def test_context_manager(self, s3_client):
         """测试异步上下文管理器"""
-        mock_session = AsyncMock()
-        mock_session.close = AsyncMock()
-        
-        with patch('aiohttp.ClientSession', return_value=mock_session):
-            async with s3_client as client:
-                assert client.session is not None
-                assert client.session == mock_session
+        with patch('storage.s3_client.AioSession') as mock_session_class:
+            mock_session = MagicMock()
+            mock_session_class.return_value = mock_session
             
-            # 验证会话被关闭
-            mock_session.close.assert_called_once()
-    
-    async def test_upload_file_success(self, s3_client):
-        """测试文件上传成功"""
-        # 创建模拟会话
-        mock_session = AsyncMock()
-        s3_client.session = mock_session
+            mock_client = AsyncMock()
+            mock_session.create_client.return_value = mock_client
+            
+            async with s3_client as client:
+                assert client is s3_client
+                assert s3_client._client is not None
+                mock_session.create_client.assert_called_once_with(
+                    "s3",
+                    endpoint_url="http://localhost:9000",
+                    aws_access_key_id="test_access_key",
+                    aws_secret_access_key="test_secret_key",
+                    region_name="us-east-1",
+                )
+
+    def test_encode_filename(self, s3_client):
+        """测试文件名编码功能"""
+        # 测试普通文件名
+        assert s3_client._encode_filename("test.txt") == "test.txt"
         
-        # 创建模拟响应
-        mock_response = AsyncMock()
-        mock_response.status = 200
+        # 测试包含空格的文件名
+        assert s3_client._encode_filename("my file.txt") == "my%20file.txt"
         
-        # 直接模拟 put 方法返回响应对象
-        mock_session.put = AsyncMock(return_value=mock_response)
+        # 测试包含特殊字符的文件名
+        assert s3_client._encode_filename("file with spaces & symbols!.pdf") == "file%20with%20spaces%20%26%20symbols%21.pdf"
         
-        filename = "test.pdf"
-        content = b"PDF content"
+        # 测试中文文件名
+        assert s3_client._encode_filename("测试文件.txt") == "%E6%B5%8B%E8%AF%95%E6%96%87%E4%BB%B6.txt"
         
-        result = await s3_client.upload_file(filename, content)
+        # 测试包含路径分隔符的文件名
+        assert s3_client._encode_filename("folder/subfolder/file.txt") == "folder%2Fsubfolder%2Ffile.txt"
+
+    @pytest.mark.asyncio
+    async def test_upload_file_success(self, s3_client, mock_s3_client):
+        """测试成功上传文件"""
+        s3_client._client = mock_s3_client
+        content = b"test file content"
         
-        # 验证结果
-        assert "test_bucket" in result
-        assert filename in result
-        assert "documents" in result
+        result = await s3_client.upload_file("test file.txt", content)
         
-        # 验证调用
-        mock_session.put.assert_called_once()
-        call_args = mock_session.put.call_args
-        assert "test_bucket" in call_args[0][0]  # URL包含bucket
-    
-    async def test_upload_file_failure(self, s3_client):
-        """测试文件上传失败"""
-        # 创建模拟会话
-        mock_session = AsyncMock()
-        s3_client.session = mock_session
+        # 验证put_object被调用
+        mock_s3_client.put_object.assert_called_once_with(
+            Bucket="test_bucket",
+            Key="test%20file.txt",
+            Body=ANY,  # 使用ANY忽略BytesIO对象的内存地址
+            ContentType="application/octet-stream"
+        )
         
-        # 创建模拟响应
-        mock_response = AsyncMock()
-        mock_response.status = 500
-        mock_response.text = AsyncMock(return_value="Internal Server Error")
+        # 验证generate_presigned_url被调用（通过mock的客户端）
+        mock_s3_client.generate_presigned_url.assert_called_once_with(
+            "get_object",
+            Params={"Bucket": "test_bucket", "Key": "test%20file.txt"},
+            ExpiresIn=604800  # 7天的秒数
+        )
         
-        # 直接模拟 put 方法返回响应对象
-        mock_session.put = AsyncMock(return_value=mock_response)
+        assert result == "https://example.com/presigned_url"
+
+    @pytest.mark.asyncio
+    async def test_upload_file_not_initialized(self, s3_client):
+        """测试未初始化的客户端上传文件"""
+        with pytest.raises(S3ClientNotInitializedError):
+            await s3_client.upload_file("test.txt", b"content")
+
+    @pytest.mark.asyncio
+    async def test_download_file_success(self, s3_client, mock_s3_client):
+        """测试成功下载文件"""
+        s3_client._client = mock_s3_client
         
-        filename = "test.pdf"
-        content = b"PDF content"
+        # 模拟响应对象
+        mock_body = AsyncMock()
+        mock_body.__aenter__ = AsyncMock(return_value=mock_body)
+        mock_body.read = AsyncMock(return_value=b"downloaded content")
+        mock_response = {
+            'Body': mock_body
+        }
+        mock_s3_client.get_object.return_value = mock_response
         
-        with pytest.raises(S3Error, match="上传失败: 500"):
-            await s3_client.upload_file(filename, content)
-    
-    async def test_upload_files_success(self, s3_client):
-        """测试批量文件上传成功"""
-        # 创建模拟会话
-        mock_session = AsyncMock()
-        s3_client.session = mock_session
+        result = await s3_client.download_file("test%20file.txt")
         
-        # 创建模拟响应
-        mock_response = AsyncMock()
-        mock_response.status = 200
+        # 验证get_object被调用
+        mock_s3_client.get_object.assert_called_once_with(
+            Bucket="test_bucket",
+            Key="test%20file.txt"
+        )
         
-        # 直接模拟 put 方法返回响应对象
-        mock_session.put = AsyncMock(return_value=mock_response)
+        assert result == b"downloaded content"
+
+    @pytest.mark.asyncio
+    async def test_download_file_by_filename(self, s3_client, mock_s3_client):
+        """测试通过文件名下载文件"""
+        s3_client._client = mock_s3_client
         
-        files = [
-            ("doc1.pdf", b"PDF content 1"),
-            ("doc2.docx", b"DOCX content 2")
-        ]
+        # 模拟响应对象
+        mock_body = AsyncMock()
+        mock_body.__aenter__ = AsyncMock(return_value=mock_body)
+        mock_body.read = AsyncMock(return_value=b"downloaded content")
+        mock_response = {
+            'Body': mock_body
+        }
+        mock_s3_client.get_object.return_value = mock_response
         
-        results = await s3_client.upload_files(files)
+        result = await s3_client.download_file_by_filename("test file.txt")
         
-        # 验证结果
-        assert len(results) == 2
-        assert all("test_bucket" in result for result in results)
-        assert all("documents" in result for result in results)
+        # 验证get_object被调用，使用编码后的key
+        mock_s3_client.get_object.assert_called_once_with(
+            Bucket="test_bucket",
+            Key="test%20file.txt"
+        )
         
-        # 验证调用次数
-        assert mock_session.put.call_count == 2
-    
-    async def test_upload_files_with_errors(self, s3_client):
-        """测试批量上传包含错误"""
-        # 创建模拟会话
-        mock_session = AsyncMock()
-        s3_client.session = mock_session
+        assert result == b"downloaded content"
+
+    @pytest.mark.asyncio
+    async def test_download_file_not_initialized(self, s3_client):
+        """测试未初始化的客户端下载文件"""
+        with pytest.raises(S3ClientNotInitializedError):
+            await s3_client.download_file("test.txt")
         
-        # 第一个文件成功，第二个文件失败
-        mock_response_success = AsyncMock()
-        mock_response_success.status = 200
+        with pytest.raises(S3ClientNotInitializedError):
+            await s3_client.download_file_by_filename("test.txt")
+
+    @pytest.mark.asyncio
+    async def test_generate_presigned_url_success(self, s3_client, mock_s3_client):
+        """测试成功生成预签名URL"""
+        s3_client._client = mock_s3_client
         
-        mock_response_failure = AsyncMock()
-        mock_response_failure.status = 500
-        mock_response_failure.text = AsyncMock(return_value="Error")
+        result = await s3_client.generate_presigned_url("test%20file.txt", expires_days=1)
         
-        # 设置 side_effect 来返回不同的响应
-        mock_session.put = AsyncMock(side_effect=[
-            mock_response_success, 
-            mock_response_failure
-        ])
+        # 验证generate_presigned_url被调用
+        mock_s3_client.generate_presigned_url.assert_called_once_with(
+            "get_object",
+            Params={"Bucket": "test_bucket", "Key": "test%20file.txt"},
+            ExpiresIn=86400  # 1天的秒数
+        )
         
-        files = [
-            ("doc1.pdf", b"PDF content 1"),
-            ("doc2.docx", b"DOCX content 2")
-        ]
+        assert result == "https://example.com/presigned_url"
+
+    @pytest.mark.asyncio
+    async def test_generate_presigned_url_not_initialized(self, s3_client):
+        """测试未初始化的客户端生成预签名URL"""
+        with pytest.raises(S3ClientNotInitializedError):
+            await s3_client.generate_presigned_url("test.txt")
+
+    @pytest.mark.asyncio
+    async def test_generate_presigned_url_default_expires(self, s3_client, mock_s3_client):
+        """测试默认过期时间的预签名URL"""
+        s3_client._client = mock_s3_client
         
-        results = await s3_client.upload_files(files)
+        await s3_client.generate_presigned_url("test.txt")
         
-        # 验证结果包含异常
-        assert len(results) == 2
-        assert isinstance(results[0], str)  # 第一个成功
-        assert isinstance(results[1], Exception)  # 第二个失败
-    
-    async def test_download_file_success(self, s3_client):
-        """测试文件下载成功"""
-        # 创建模拟会话
-        mock_session = AsyncMock()
-        s3_client.session = mock_session
-        
-        # 创建模拟响应
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.read = AsyncMock(return_value=b"file content")
-        
-        # 直接模拟 get 方法返回响应对象
-        mock_session.get = AsyncMock(return_value=mock_response)
-        
-        file_url = "http://localhost:9000/test_bucket/documents/test.pdf"
-        
-        result = await s3_client.download_file(file_url)
-        
-        # 验证结果
-        assert result == b"file content"
-        
-        # 验证调用
-        mock_session.get.assert_called_once_with(file_url)
-    
-    async def test_download_file_failure(self, s3_client):
-        """测试文件下载失败"""
-        # 创建模拟会话
-        mock_session = AsyncMock()
-        s3_client.session = mock_session
-        
-        # 创建模拟响应
-        mock_response = AsyncMock()
-        mock_response.status = 404
-        mock_response.text = AsyncMock(return_value="File not found")
-        
-        # 直接模拟 get 方法返回响应对象
-        mock_session.get = AsyncMock(return_value=mock_response)
-        
-        file_url = "http://localhost:9000/test_bucket/documents/notfound.pdf"
-        
-        with pytest.raises(S3Error, match="下载失败: 404"):
-            await s3_client.download_file(file_url)
-    
-    def test_get_content_type(self, s3_client):
-        """测试内容类型识别"""
-        # 测试PDF文件
-        assert s3_client._get_content_type("document.pdf") == "application/pdf"
-        
-        # 测试DOCX文件
-        assert s3_client._get_content_type("document.docx") == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        
-        # 测试图片文件
-        assert s3_client._get_content_type("image.jpg") == "image/jpeg"
-        assert s3_client._get_content_type("image.png") == "image/png"
-        
-        # 测试未知扩展名
-        assert s3_client._get_content_type("unknown.xyz") == "application/octet-stream"
-        
-        # 测试无扩展名
-        assert s3_client._get_content_type("filename") == "application/octet-stream"
+        # 验证默认7天过期时间
+        mock_s3_client.generate_presigned_url.assert_called_once_with(
+            "get_object",
+            Params={"Bucket": "test_bucket", "Key": "test.txt"},
+            ExpiresIn=604800  # 7天的秒数
+        )
