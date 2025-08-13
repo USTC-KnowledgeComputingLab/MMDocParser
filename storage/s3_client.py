@@ -1,10 +1,10 @@
+import urllib.parse
 from contextlib import AsyncExitStack
 from datetime import timedelta
 from io import BytesIO
 from typing import Any, Protocol, Self, runtime_checkable
-import urllib.parse
 
-from aiobotocore.session import AioSession
+from aiobotocore.session import AioSession  # type: ignore
 
 
 # ruff: noqa: N803
@@ -79,10 +79,10 @@ class AsyncS3Client:
         """上传文件，使用编码后的文件名作为key"""
         if self._client is None:
             raise S3ClientNotInitializedError
-        
+
         # 对文件名进行编码
         encoded_key = self._encode_filename(filename)
-        
+
         await self._client.put_object(
             Bucket=self.bucket,
             Key=encoded_key,
@@ -91,23 +91,23 @@ class AsyncS3Client:
         )
         return await self.generate_presigned_url(encoded_key)
 
-    async def download_file(self, key: str) -> bytes:
+    async def download_file(self, key: str) -> Any:
         """下载文件内容"""
         if self._client is None:
             raise S3ClientNotInitializedError
-        
+
         response = await self._client.get_object(
             Bucket=self.bucket,
             Key=key
         )
-        
+
         # 读取文件内容
         async with response['Body'] as stream:
             content = await stream.read()
-        
+
         return content
 
-    async def download_file_by_filename(self, filename: str) -> bytes:
+    async def download_file_by_filename(self, filename: str) -> Any:
         """通过原始文件名下载文件"""
         encoded_key = self._encode_filename(filename)
         return await self.download_file(encoded_key)
