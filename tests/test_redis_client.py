@@ -73,7 +73,7 @@ class TestTaskManager:
         result = await task_manager.get_task()
         
         assert result == expected_task
-        task_manager.redis.blpop.assert_called_once_with("test_queue", timeout=1)
+        task_manager.redis.blpop.assert_called_once_with(["test_queue"], timeout=1)
     
     async def test_get_task_no_data(self, task_manager):
         """测试获取任务无数据"""
