@@ -19,7 +19,7 @@ class TestRedisIntegration:
     async def redis_client(self):
         """获取真实的Redis客户端"""
         try:
-            client = await get_redis_client("redis://localhost:6379")
+            client = await get_redis_client(os.getenv("REDIS_URL"))
             # 清理测试数据
             await client.flushdb()
             yield client
@@ -223,7 +223,7 @@ class TestFullSystemIntegration:
         """获取所有系统组件"""
         try:
             # Redis客户端
-            redis_client = await get_redis_client("redis://localhost:6379")
+            redis_client = await get_redis_client(os.getenv("REDIS_URL"))
             await redis_client.flushdb()
             
             # 任务管理器
@@ -286,12 +286,12 @@ class TestFullSystemIntegration:
         assert retrieved_task["task_id"] == "workflow-test-123"
         
         # 6. 模拟文档解析结果
-        parsing_result = {
+        parsing_result = [{
             "text": "Chemical document content with formulas and structures.",
             "formulas": ["H2O", "CO2", "CH4"],
             "structures": ["molecular_structure_1.png"],
             "confidence": 0.92
-        }
+        }]
         
         # 7. 更新任务状态和结果
         update_success = await task_manager.update_task_status(
@@ -314,6 +314,7 @@ class TestFullSystemIntegration:
 # 环境检查装饰器
 def requires_redis(func):
     """需要Redis服务的装饰器"""
+    print(os.getenv("REDIS_URL"))
     return pytest.mark.skipif(
         not os.getenv("REDIS_URL") and not os.getenv("REDIS_ENABLED", "false").lower() == "true",
         reason="需要Redis服务"
