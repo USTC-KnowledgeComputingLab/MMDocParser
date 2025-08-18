@@ -13,6 +13,8 @@ dependencies = [
     "dotenv>=0.9.9",
     "aiobotocore>=2.24.0",
     "redis>=6.4.0",
+    "openpyxl>=3.1.5",
+    "pydantic>=2.11.7",
 ]
 
 [dependency-groups]
@@ -25,7 +27,8 @@ all-dev = [
 dev = [
     "pytest>=8.4.1",
     "pytest-cov>=6.2.1",
-    "pytest-asyncio>=0.23.0",  # 添加异步测试支持
+    "pytest-asyncio>=0.23.0", # 添加异步测试支持
+    "pillow>=11.3.0",
 ]
 lint = [
     "bandit>=1.8.6",
