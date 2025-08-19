@@ -1,37 +1,29 @@
 import logging
-from abc import ABC, abstractmethod
 
-from pydantic import BaseModel
+from parsers.document_parser import DocumentParser, ParseResult
+from parsers.excel_parser import ExcelParser
 
 logger = logging.getLogger(__name__)
 
-class DocumentData(BaseModel):
-    """文档数据类"""
-    type: str
-    name: str
-    content: str
-    description: str
-
-class ParseResult(BaseModel):
-    """解析结果类"""
-    title: str
-    document: list[DocumentData]
-    processing_time: float
-    success: bool
-    error_message: str | None = None
-
-class DocumentParser(ABC):
-    """文档解析器基类"""
+class DocumentParserFactory:
+    """文档解析器工厂"""
 
     def __init__(self) -> None:
-        self.supported_formats: list[str] = []
+        self.parsers: list[DocumentParser] = [
+            ExcelParser()
+        ]
 
-    @abstractmethod
-    async def parse(self, file_path: str) -> ParseResult:
+    def get_parser(self, file_path: str) -> DocumentParser | None:
+        """根据文件路径获取合适的解析器"""
+        for parser in self.parsers:
+            if parser.can_parse(file_path):
+                return parser
+        return None
+
+    async def parse_document(self, file_path: str) -> ParseResult:
         """解析文档"""
-        pass
+        parser = self.get_parser(file_path)
+        if not parser:
+            raise ValueError(f"不支持的文件格式: {file_path}")
 
-    @abstractmethod
-    def can_parse(self, file_path: str) -> bool:
-        """检查是否可以解析该文件"""
-        pass
+        return await parser.parse(file_path)

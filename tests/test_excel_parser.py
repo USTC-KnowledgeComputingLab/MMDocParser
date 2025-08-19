@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 
 from parsers.excel_parser import ExcelParser
-from parsers.document_parser import DocumentData
+from parsers.base_models import ChunkData
 
 
 @pytest.mark.asyncio
@@ -49,7 +49,7 @@ async def test_parse_real_basic_and_image():
 
             assert result.success is True
             # 内容：Sheet1标题、Sheet1图片、Sheet1表格、Sheet2标题、Sheet2表格、结束文本
-            content = result.document
+            content = result.chunks
             assert len(content) == 6
 
             # 校验顺序与关键字段
@@ -91,12 +91,12 @@ async def test_parse_real_merged_cells():
         result = await parser.parse(xlsx_path)
 
         assert result.success is True
-        content = result.document
+        content = result.chunks
         # 结构：标题、表格、结束文本
         assert len(content) == 3
 
         # 表格在索引1
-        table_chunk: DocumentData = content[1]
+        table_chunk: ChunkData = content[1]
         assert table_chunk.type == "table"
 
         import json as _json

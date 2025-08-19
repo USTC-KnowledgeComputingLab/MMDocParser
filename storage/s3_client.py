@@ -40,6 +40,10 @@ class S3ClientNotInitializedError(Exception):
         super().__init__("S3 client not initialized")
 
 
+class S3Error(Exception):
+    """S3操作异常"""
+    pass
+
 class AsyncS3Client:
     def __init__(self,
                  endpoint_url: str | None,
