@@ -48,20 +48,22 @@ async def test_parse_real_basic_and_image():
             result = await parser.parse(xlsx_path)
 
             assert result.success is True
-            # 内容：Sheet1标题、Sheet1图片、Sheet1表格、Sheet2标题、Sheet2表格、结束文本
-            content = result.chunks
-            assert len(content) == 6
+            # 内容：Sheet1标题、Sheet1图片、Sheet1表格、Sheet2标题、Sheet2表格
+            content = result.tables
+            assert len(content) == 2
+
+            assert len(result.images) == 1
+            assert len(result.texts) == 2
 
             # 校验顺序与关键字段
-            assert content[0].type == "text" and content[0].name == "Sheet1"
-            assert content[1].type == "image"
-            assert content[1].name == "#/pictures/0"
-            assert content[1].content.startswith("data:image/")
+            assert result.texts[0].type == "text" and result.texts[0].name == "Sheet1"
+            assert result.images[0].type == "image"
+            assert result.images[0].name == "#/pictures/0"
+            assert result.images[0].content.startswith("data:image/")
 
-            assert content[2].type == "table"
-            assert content[3].type == "text" and content[3].name == "Sheet2"
-            assert content[4].type == "table"
-            assert content[5].type == "text" and content[5].name == "结束文本"
+            assert result.tables[0].type == "table"
+            assert result.texts[1].type == "text" and result.texts[1].name == "Sheet2"
+            assert result.tables[1].type == "table"
         finally:
             os.remove(xlsx_path)
     finally:
@@ -91,19 +93,19 @@ async def test_parse_real_merged_cells():
         result = await parser.parse(xlsx_path)
 
         assert result.success is True
-        content = result.chunks
-        # 结构：标题、表格、结束文本
-        assert len(content) == 3
+        # 结构：标题、表格
+        assert len(result.tables) == 1
+        assert len(result.texts) == 1
 
         # 表格在索引1
-        table_chunk: ChunkData = content[1]
+        table_chunk: ChunkData = result.tables[0]
         assert table_chunk.type == "table"
 
-        import json as _json
-        payload = _json.loads(table_chunk.content)
-        assert payload["headers"] == ["Merged Header", "Merged Header"]
-        assert payload["dimensions"]["rows"] == 2
-        assert payload["dimensions"]["columns"] == 2
+        payload = table_chunk.content
+        assert payload.row_headers == ["Merged Header", "Merged Header"]
+        assert payload.data == [["Value1", "Value2"]]
+        assert payload.rows == 2
+        assert payload.columns == 2
     finally:
         os.remove(xlsx_path)
 

@@ -19,7 +19,13 @@ from openpyxl.drawing.image import Image  # type: ignore
 from openpyxl.workbook.workbook import Workbook  # type: ignore
 from openpyxl.worksheet.worksheet import Worksheet  # type: ignore
 
-from parsers.base_models import ChunkData, ChunkType, DocumentData, DocumentParser
+from parsers.base_models import (
+    ChunkData,
+    ChunkType,
+    DocumentData,
+    DocumentParser,
+    TableDataItem,
+)
 
 # 忽略 openpyxl 的特定警告
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
@@ -57,42 +63,6 @@ class ExcelParser(DocumentParser):
         self.image_index: int = 0
         self.supported_formats: list[str] = ['.xlsx', '.xls']
 
-    async def parse(self, excel_path: str) -> DocumentData:
-        """
-        解析Excel文件并保存结果
-
-        Args:
-            excel_path: Excel文件路径
-            output_dir: 输出目录路径
-        Returns:
-            ParseResult: 解析结果对象
-        Raises:
-            ExcelParseError: 当解析失败时抛出
-        """
-        start_time = time.time()
-
-        try:
-            # 转换Excel到JSON格式
-            title, document_data = self._excel_to_json(excel_path)
-
-            # 计算处理时间
-            processing_time = time.time() - start_time
-
-
-            return DocumentData(
-                title=title,
-                chunks=document_data,
-                processing_time=processing_time,
-                success=True
-            )
-
-        except Exception as e:
-            processing_time = time.time() - start_time
-            return DocumentData(
-                success=False,
-                error_message=str(e)
-            )
-
     def can_parse(self, file_path: str) -> bool:
         """
         验证输入文件
@@ -103,7 +73,7 @@ class ExcelParser(DocumentParser):
         """
         return any(file_path.lower().endswith(fmt) for fmt in self.supported_formats)
 
-    def _excel_to_json(self, excel_path: str) -> tuple[str, list[ChunkData]]:
+    async def parse(self, excel_path: str) -> DocumentData:
         """
         将Excel文件转换为JSON格式
         Args:
@@ -112,49 +82,57 @@ class ExcelParser(DocumentParser):
             DocumentData: 文档数据
         """
         # 获取文件名作为标题（不带扩展名）
-        title = Path(excel_path).stem
+        start_time = time.time()
 
-        # 初始化内容列表和图片列表
-        content: list[ChunkData] = []
-        self.image_index = 0
+        try:
+            # 初始化内容列表和图片列表
+            texts: list[ChunkData] = []
+            tables: list[ChunkData] = []
+            images: list[ChunkData] = []
 
-        # 加载工作簿
-        workbook = self._load_workbook(excel_path)
+            # 加载工作簿
+            workbook = self._load_workbook(excel_path)
 
-        # 处理每个工作表
-        for sheet_index, sheet_name in enumerate(workbook.sheetnames):
-            sheet = workbook[sheet_name]
+            # 处理每个工作表
+            for sheet_index, sheet_name in enumerate(workbook.sheetnames):
+                sheet = workbook[sheet_name]
 
-            # 添加工作表标题
-            content.append(ChunkData(
-                type=ChunkType.TEXT,
-                name=sheet_name,
-                content=f"工作表 {sheet_index + 1}: {sheet_name}",
-                description="工作表标题"
-            ))
+                # 添加工作表标题
+                texts.append(ChunkData(
+                    type=ChunkType.TEXT,
+                    name=sheet_name,
+                    content=f"工作表 {sheet_index + 1}: {sheet_name}",
+                    description="工作表标题"
+                ))
 
-            # 处理图片
-            sheet_images = self._extract_sheet_images(sheet)
-            content.extend(sheet_images)
+                # 处理图片
+                sheet_images = self._extract_sheet_images(sheet)
+                images.extend(sheet_images)
 
-            # 处理表格数据
-            table_content = self._extract_table_data(sheet)
-            content.append(ChunkData(
-                type=ChunkType.TABLE,
-                name="表格",
-                content=json.dumps(table_content),
-                description="表格"
-            ))
-
-        # 添加结束文本
-        content.append(ChunkData(
-            type=ChunkType.TEXT,
-            name="结束文本",
-            content="",
-            description="结束文本"
-        ))
-
-        return title, content
+                # 处理表格数据
+                table_content = self._extract_table_data(sheet)
+                tables.append(ChunkData(
+                    type=ChunkType.TABLE,
+                    name="表格",
+                    content=table_content,
+                    description="表格"
+                ))
+            processing_time = time.time() - start_time
+            return DocumentData(
+                title=Path(excel_path).stem,
+                texts=texts,
+                tables=tables,
+                images=images,
+                processing_time=processing_time,
+                success=True
+            )
+        except Exception as e:
+            processing_time = time.time() - start_time
+            return DocumentData(
+                success=False,
+                error_message=str(e),
+                processing_time=processing_time
+            )
 
     def _load_workbook(self, excel_path: str) -> Workbook:
         """
@@ -250,13 +228,13 @@ class ExcelParser(DocumentParser):
             return img_format
         return self.config.default_image_format
 
-    def _process_cell_value(self, cell_value: Any) -> CellValue:
+    def _process_cell_value(self, cell_value: Any) -> str:
         """
         预处理单元格值，将datetime对象转换为字符串
         Args:
             cell_value: 原始单元格值
         Returns:
-            CellValue: 处理后的单元格值
+            str: 处理后的单元格值
         """
         if cell_value is None:
             return ""
@@ -269,14 +247,10 @@ class ExcelParser(DocumentParser):
         if isinstance(cell_value, date):
             return cell_value.strftime("%Y-%m-%d")
 
-        # 处理其他类型
-        if isinstance(cell_value, str|int|float|bool):
-            return cell_value
-
         # 对于其他类型，转换为字符串
         return str(cell_value)
 
-    def _extract_table_data(self, sheet: Worksheet) -> dict[str, Any]:
+    def _extract_table_data(self, sheet: Worksheet) -> TableDataItem:
         """
         提取表格数据
         Args:
@@ -295,16 +269,14 @@ class ExcelParser(DocumentParser):
         # 提取所有数据
         all_rows = self._extract_all_rows(sheet, max_row, max_col, merged_map)
 
-        return {
-            "dimensions": {
-                "rows": len(all_rows),
-                "columns": max_col
-            },
-            "headers": all_rows[0] if all_rows else [],
-            "data": all_rows[1:] if len(all_rows) > 1 else []
-        }
+        return TableDataItem(
+            rows=len(all_rows),
+            columns=max_col,
+            row_headers=all_rows[0] if all_rows else [],
+            data=all_rows[1:] if len(all_rows) > 1 else []
+        )
 
-    def _get_merged_cells(self, sheet: Worksheet) -> dict[tuple[int, int, int, int], CellValue]:
+    def _get_merged_cells(self, sheet: Worksheet) -> dict[tuple[int, int, int, int], str]:
         """
         获取合并单元格信息
         Args:
@@ -323,7 +295,7 @@ class ExcelParser(DocumentParser):
                 merged_ranges[(min_row, min_col, max_row, max_col)] = merged_value
         return merged_ranges
 
-    def _create_merged_cell_map(self, merged_ranges: dict, sheet: Worksheet) -> dict[tuple[int, int], CellValue]:
+    def _create_merged_cell_map(self, merged_ranges: dict, sheet: Worksheet) -> dict[tuple[int, int], str]:
         """
         创建合并单元格映射
         Args:
@@ -342,7 +314,7 @@ class ExcelParser(DocumentParser):
         return merged_map
 
     def _extract_all_rows(self, sheet: Worksheet, max_row: int, max_col: int,
-                          merged_map: dict[tuple[int, int], CellValue]) -> TableData:
+                          merged_map: dict[tuple[int, int], str]) -> list[list[str]]:
         """
         提取所有行数据
         Args:

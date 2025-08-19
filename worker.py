@@ -22,7 +22,7 @@ async def worker(app: Sanic) -> dict[str, Any]:
         parse_result = await parser_factory.parse_document(file_path)
         if not parse_result.success:
             continue
-        chunk_list = parse_result.chunks
+        chunk_list = parse_result.texts + parse_result.tables + parse_result.images + parse_result.formulas
         # 控制并发数量，防止访问量过大导致失败
         SEMAPHORE_LIMIT = 10  # 可根据实际情况调整
         semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
@@ -35,5 +35,8 @@ async def worker(app: Sanic) -> dict[str, Any]:
         enhanced_chunk_list = await asyncio.gather(
             *(enhance_with_semaphore(chunk, semaphore) for chunk in chunk_list)
         )
-        parse_result.chunks = enhanced_chunk_list
+        parse_result.texts = enhanced_chunk_list[:len(parse_result.texts)]
+        parse_result.tables = enhanced_chunk_list[len(parse_result.texts):len(parse_result.texts) + len(parse_result.tables)]
+        parse_result.images = enhanced_chunk_list[len(parse_result.texts) + len(parse_result.tables):len(parse_result.texts) + len(parse_result.tables) + len(parse_result.images)]
+        parse_result.formulas = enhanced_chunk_list[len(parse_result.texts) + len(parse_result.tables) + len(parse_result.images):]
         return parse_result.model_dump(mode="json")
