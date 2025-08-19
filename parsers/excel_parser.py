@@ -184,7 +184,7 @@ class ExcelParser(DocumentParser):
         sheet_images: list[DocumentData] = []
 
         images = getattr(sheet, '_images', None)
-        if not images or not isinstance(images, (list, tuple)):
+        if not images or not isinstance(images, list|tuple):
             return sheet_images
 
         # 收集图片信息
