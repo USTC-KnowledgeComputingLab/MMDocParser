@@ -1,6 +1,6 @@
 import logging
 
-from parsers.document_parser import DocumentParser, ParseResult
+from parsers.base_models import DocumentData, DocumentParser
 from parsers.excel_parser import ExcelParser
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class DocumentParserFactory:
                 return parser
         return None
 
-    async def parse_document(self, file_path: str) -> ParseResult:
+    async def parse_document(self, file_path: str) -> DocumentData:
         """解析文档"""
         parser = self.get_parser(file_path)
         if not parser:
