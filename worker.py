@@ -4,8 +4,8 @@ from typing import Any
 from sanic import Sanic
 
 from enhancers.information_enhancer import InformationEnhancerFactory
-from parsers.document_parser import DocumentParserFactory
 from parsers.base_models import ChunkData
+from parsers.document_parser import DocumentParserFactory
 
 
 async def worker(app: Sanic) -> dict[str, Any]:
