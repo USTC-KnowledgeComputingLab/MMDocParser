@@ -19,7 +19,7 @@ from openpyxl.drawing.image import Image  # type: ignore
 from openpyxl.workbook.workbook import Workbook  # type: ignore
 from openpyxl.worksheet.worksheet import Worksheet  # type: ignore
 
-from parsers.document_parser import DocumentData, DocumentParser, ParseResult
+from parsers.base_models import ChunkData, ChunkType, DocumentData, DocumentParser
 
 # 忽略 openpyxl 的特定警告
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
@@ -57,7 +57,7 @@ class ExcelParser(DocumentParser):
         self.image_index: int = 0
         self.supported_formats: list[str] = ['.xlsx', '.xls']
 
-    async def parse(self, excel_path: str) -> ParseResult:
+    async def parse(self, excel_path: str) -> DocumentData:
         """
         解析Excel文件并保存结果
 
@@ -79,19 +79,16 @@ class ExcelParser(DocumentParser):
             processing_time = time.time() - start_time
 
 
-            return ParseResult(
+            return DocumentData(
                 title=title,
-                document=document_data,
+                chunks=document_data,
                 processing_time=processing_time,
                 success=True
             )
 
         except Exception as e:
             processing_time = time.time() - start_time
-            return ParseResult(
-                title="",
-                document=[],
-                processing_time=processing_time,
+            return DocumentData(
                 success=False,
                 error_message=str(e)
             )
@@ -106,7 +103,7 @@ class ExcelParser(DocumentParser):
         """
         return any(file_path.lower().endswith(fmt) for fmt in self.supported_formats)
 
-    def _excel_to_json(self, excel_path: str) -> tuple[str, list[DocumentData]]:
+    def _excel_to_json(self, excel_path: str) -> tuple[str, list[ChunkData]]:
         """
         将Excel文件转换为JSON格式
         Args:
@@ -118,7 +115,7 @@ class ExcelParser(DocumentParser):
         title = Path(excel_path).stem
 
         # 初始化内容列表和图片列表
-        content: list[DocumentData] = []
+        content: list[ChunkData] = []
         self.image_index = 0
 
         # 加载工作簿
@@ -129,8 +126,8 @@ class ExcelParser(DocumentParser):
             sheet = workbook[sheet_name]
 
             # 添加工作表标题
-            content.append(DocumentData(
-                type="text",
+            content.append(ChunkData(
+                type=ChunkType.TEXT,
                 name=sheet_name,
                 content=f"工作表 {sheet_index + 1}: {sheet_name}",
                 description="工作表标题"
@@ -142,16 +139,16 @@ class ExcelParser(DocumentParser):
 
             # 处理表格数据
             table_content = self._extract_table_data(sheet)
-            content.append(DocumentData(
-                type="table",
+            content.append(ChunkData(
+                type=ChunkType.TABLE,
                 name="表格",
                 content=json.dumps(table_content),
                 description="表格"
             ))
 
         # 添加结束文本
-        content.append(DocumentData(
-            type="text",
+        content.append(ChunkData(
+            type=ChunkType.TEXT,
             name="结束文本",
             content="",
             description="结束文本"
@@ -173,7 +170,7 @@ class ExcelParser(DocumentParser):
             keep_vba=self.config.keep_vba
         )
 
-    def _extract_sheet_images(self, sheet: Worksheet) -> list[DocumentData]:
+    def _extract_sheet_images(self, sheet: Worksheet) -> list[ChunkData]:
         """
         提取工作表中的图片
         Args:
@@ -181,7 +178,7 @@ class ExcelParser(DocumentParser):
         Returns:
             List[DocumentData]: 图片信息列表
         """
-        sheet_images: list[DocumentData] = []
+        sheet_images: list[ChunkData] = []
 
         images = getattr(sheet, '_images', None)
         if not images or not isinstance(images, list|tuple):
@@ -202,7 +199,7 @@ class ExcelParser(DocumentParser):
 
         return sheet_images
 
-    def _process_image_object(self, img_obj: Image) -> DocumentData | None:
+    def _process_image_object(self, img_obj: Image) -> ChunkData | None:
         """
         处理单个图片对象
         Args:
@@ -222,8 +219,8 @@ class ExcelParser(DocumentParser):
             uri = f"data:image/{img_format};base64,{base64_encoded}"
 
             # 创建图片信息
-            image_info = DocumentData(
-                type="image",
+            image_info = ChunkData(
+                type=ChunkType.IMAGE,
                 name=f"#/pictures/{self.image_index}",
                 content=uri,
                 description=self.config.image_description_placeholder
@@ -373,7 +370,6 @@ class ExcelParser(DocumentParser):
             all_rows.append(row_data)
 
         return all_rows
-
 
     def _save_json(self, data: Any, file_path: Path) -> None:
         """
