@@ -4,8 +4,8 @@ from typing import Any
 from sanic import Sanic
 
 from enhancers.information_enhancer import InformationEnhancerFactory
-from parsers.document_parser import DocumentData
-from parsers.document_parser_factory import DocumentParserFactory
+from parsers.document_parser import DocumentParserFactory
+from parsers.base_models import ChunkData
 
 
 async def worker(app: Sanic) -> dict[str, Any]:
@@ -22,12 +22,12 @@ async def worker(app: Sanic) -> dict[str, Any]:
         parse_result = await parser_factory.parse_document(file_path)
         if not parse_result.success:
             continue
-        chunk_list = parse_result.document
+        chunk_list = parse_result.chunks
         # 控制并发数量，防止访问量过大导致失败
         SEMAPHORE_LIMIT = 10  # 可根据实际情况调整
         semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
 
-        async def enhance_with_semaphore(chunk: DocumentData, semaphore: asyncio.Semaphore) -> DocumentData:
+        async def enhance_with_semaphore(chunk: ChunkData, semaphore: asyncio.Semaphore) -> ChunkData:
             async with semaphore:
                 return await enhancer_factory.enhance_information(chunk)
 
@@ -35,5 +35,5 @@ async def worker(app: Sanic) -> dict[str, Any]:
         enhanced_chunk_list = await asyncio.gather(
             *(enhance_with_semaphore(chunk, semaphore) for chunk in chunk_list)
         )
-        parse_result.document = enhanced_chunk_list
+        parse_result.chunks = enhanced_chunk_list
         return parse_result.model_dump(mode="json")

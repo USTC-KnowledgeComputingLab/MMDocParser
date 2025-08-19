@@ -1,33 +1,33 @@
 from abc import ABC, abstractmethod
 
-from parsers.document_parser import DocumentData
+from parsers.base_models import ChunkData, ChunkType
 
 
 class InformationEnhancer(ABC):
     """信息增强器基类"""
     @abstractmethod
-    async def enhance(self, information: DocumentData) -> DocumentData:
+    async def enhance(self, information: ChunkData) -> ChunkData:
         """增强信息"""
         pass
 
 class TableInformationEnhancer(InformationEnhancer):
     """表格信息增强器"""
 
-    async def enhance(self, information: DocumentData) -> DocumentData:
+    async def enhance(self, information: ChunkData) -> ChunkData:
         """增强信息"""
         return information
 
 class FormulasInformationEnhancer(InformationEnhancer):
     """公式信息增强器"""
 
-    async def enhance(self, information: DocumentData) -> DocumentData:
+    async def enhance(self, information: ChunkData) -> ChunkData:
         """增强信息"""
         return information
 
 class ImageInformationEnhancer(InformationEnhancer):
     """图片信息增强器"""
 
-    async def enhance(self, information: DocumentData) -> DocumentData:
+    async def enhance(self, information: ChunkData) -> ChunkData:
         """增强信息"""
         return information
 
@@ -41,19 +41,19 @@ class InformationEnhancerFactory:
             ImageInformationEnhancer()
         ]
 
-    def get_enhancer(self, information: DocumentData) -> InformationEnhancer|None:
+    def get_enhancer(self, information: ChunkData) -> InformationEnhancer|None:
         """获取信息增强器"""
         match information.type:
-            case "table":
+            case ChunkType.TABLE:
                 return TableInformationEnhancer()
-            case "formulas":
+            case ChunkType.FORMULA:
                 return FormulasInformationEnhancer()
-            case "image":
+            case ChunkType.IMAGE:
                 return ImageInformationEnhancer()
             case _:
                 return None
 
-    async def enhance_information(self, information: DocumentData) -> DocumentData:
+    async def enhance_information(self, information: ChunkData) -> ChunkData:
         """增强信息"""
         enhancer = self.get_enhancer(information)
         if not enhancer:
