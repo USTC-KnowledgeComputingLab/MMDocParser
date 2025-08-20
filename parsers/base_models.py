@@ -1,4 +1,5 @@
 import logging
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any
 
@@ -39,3 +40,11 @@ class DocumentData(BaseModel):
     processing_time: float = 0
     success: bool
     error_message: str | None = None
+
+class DocumentParser(ABC):
+    """文档解析器基类"""
+
+    @abstractmethod
+    async def parse(self, file_path: str) -> DocumentData:
+        """解析文档"""
+        pass

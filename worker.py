@@ -4,13 +4,13 @@ from typing import Any
 from sanic import Sanic
 
 from enhancers.information_enhancer import InformationEnhancerFactory
-from parsers import get_parser
+from parsers import get_parser, load_all_parsers
 from parsers.base_models import ChunkData
 
 
 async def worker(app: Sanic) -> dict[str, Any]:
     # 使用工厂获取合适的解析器
-
+    load_all_parsers()
     enhancer_factory = InformationEnhancerFactory()
     redis = app.ctx.redis
     while True:

@@ -83,7 +83,8 @@ warn_unreachable = true
 strict_equality = true
 exclude = [
     "tests/",
-    "test_*.py"
+    "test_*.py",
+    "examples/"
 ]
 # 解决模块路径冲突
 explicit_package_bases = true
@@ -94,7 +95,8 @@ target-version = "py312"
 line-length = 88
 exclude = [
     "tests/",
-    "test_*.py"
+    "test_*.py",
+    "examples/"
 ]
 
 [tool.ruff.lint]

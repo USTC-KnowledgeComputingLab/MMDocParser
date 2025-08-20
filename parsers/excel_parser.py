@@ -23,9 +23,10 @@ from parsers.base_models import (
     ChunkData,
     ChunkType,
     DocumentData,
+    DocumentParser,
     TableDataItem,
 )
-from parsers.parser_registry import DocumentParser, register_parser
+from parsers.parser_registry import register_parser
 
 # 忽略 openpyxl 的特定警告
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
@@ -63,7 +64,7 @@ class ExcelParser(DocumentParser):
         self.config: ExcelParseConfig = config or ExcelParseConfig()
         self.image_index: int = 0
 
-    async def parse(self, excel_path: str) -> DocumentData:
+    async def parse(self, file_path: str) -> DocumentData:
         """
         将Excel文件转换为JSON格式
         Args:
@@ -81,7 +82,7 @@ class ExcelParser(DocumentParser):
             images: list[ChunkData] = []
 
             # 加载工作簿
-            workbook = self._load_workbook(excel_path)
+            workbook = self._load_workbook(file_path)
 
             # 处理每个工作表
             for sheet_index, sheet_name in enumerate(workbook.sheetnames):
@@ -109,7 +110,7 @@ class ExcelParser(DocumentParser):
                 ))
             processing_time = time.time() - start_time
             return DocumentData(
-                title=Path(excel_path).stem,
+                title=Path(file_path).stem,
                 texts=texts,
                 tables=tables,
                 images=images,
