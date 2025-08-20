@@ -5,28 +5,18 @@
 """
 
 import logging
-from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 
-from .base_models import DocumentData
+from .base_models import DocumentParser
 
 logger = logging.getLogger(__name__)
 
 # 全局解析器注册表
-PARSER_REGISTRY: dict[str, type['DocumentParser']] = {}
+PARSER_REGISTRY: dict[str, type[DocumentParser]] = {}
 
 
-class DocumentParser(ABC):
-    """文档解析器基类"""
-
-    @abstractmethod
-    async def parse(self, file_path: str) -> DocumentData:
-        """解析文档"""
-        pass
-
-
-def register_parser(suffixes: list[str]) -> Callable[[type['DocumentParser']], type['DocumentParser']]:
+def register_parser(suffixes: list[str]) -> Callable[[type[DocumentParser]], type[DocumentParser]]:
     """
     解析器注册装饰器
 
@@ -41,7 +31,7 @@ def register_parser(suffixes: list[str]) -> Callable[[type['DocumentParser']], t
         class DocxDocumentParser(DocumentParser):
             ...
     """
-    def decorator(cls: type['DocumentParser']) -> type['DocumentParser']:
+    def decorator(cls: type[DocumentParser]) -> type[DocumentParser]:
         # 验证类是否继承自 DocumentParser
         if not issubclass(cls, DocumentParser):
             raise TypeError(f"解析器类 {cls.__name__} 必须继承自 DocumentParser")
@@ -59,7 +49,7 @@ def register_parser(suffixes: list[str]) -> Callable[[type['DocumentParser']], t
     return decorator
 
 
-def get_parser(file_path: str) -> 'DocumentParser' | None:
+def get_parser(file_path: str) -> DocumentParser | None:
     """
     根据文件路径获取合适的解析器实例
 
@@ -83,22 +73,6 @@ def get_parser(file_path: str) -> 'DocumentParser' | None:
         logger.error(f"创建解析器实例失败: {parser_class.__name__}, 错误: {e}")
         return None
 
-
-def can_parse(file_path: str) -> bool:
-    """
-    检查文件是否可以被解析
-
-    Args:
-        file_path: 文件路径
-
-    Returns:
-        bool: 是否支持该文件格式
-    """
-    file = Path(file_path)
-    suffix = file.suffix.lower()
-    return suffix in PARSER_REGISTRY
-
-
 def get_supported_formats() -> list[str]:
     """
     获取所有支持的文件格式
@@ -109,7 +83,7 @@ def get_supported_formats() -> list[str]:
     return list(PARSER_REGISTRY.keys())
 
 
-def get_parser_class(suffix: str) -> type['DocumentParser'] | None:
+def get_parser_class(suffix: str) -> type[DocumentParser] | None:
     """
     根据文件扩展名获取解析器类
 

@@ -29,9 +29,10 @@ from parsers.base_models import (
     ChunkData,
     ChunkType,
     DocumentData,
+    DocumentParser,
     TableDataItem,
 )
-from parsers.parser_registry import DocumentParser, register_parser
+from parsers.parser_registry import register_parser
 
 logger = logging.getLogger(__name__)
 
