@@ -1,5 +1,4 @@
 import logging
-from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any
 
@@ -40,19 +39,3 @@ class DocumentData(BaseModel):
     processing_time: float = 0
     success: bool
     error_message: str | None = None
-
-class DocumentParser(ABC):
-    """文档解析器基类"""
-
-    def __init__(self) -> None:
-        self.supported_formats: list[str] = Field(default_factory=list)
-
-    @abstractmethod
-    async def parse(self, file_path: str) -> DocumentData:
-        """解析文档"""
-        pass
-
-    @abstractmethod
-    def can_parse(self, file_path: str) -> bool:
-        """检查是否可以解析该文件"""
-        return any(file_path.lower().endswith(fmt) for fmt in self.supported_formats)

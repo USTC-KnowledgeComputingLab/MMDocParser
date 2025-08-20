@@ -29,13 +29,14 @@ from parsers.base_models import (
     ChunkData,
     ChunkType,
     DocumentData,
-    DocumentParser,
     TableDataItem,
 )
+from parsers.parser_registry import DocumentParser, register_parser
 
 logger = logging.getLogger(__name__)
 
 
+@register_parser(['.docx'])
 class DocxDocumentParser(DocumentParser):
     """DOCX文档解析器
 
@@ -46,23 +47,11 @@ class DocxDocumentParser(DocumentParser):
     def __init__(self) -> None:
         """初始化解析器"""
         super().__init__()
-        self.supported_formats = [".docx"]
         self._converter = DocumentConverter(
             format_options={InputFormat.DOCX: WordFormatOption(pipeline_cls=SimplePipeline)},
             allowed_formats=[InputFormat.DOCX]
         )
         logger.debug("DocxDocumentParser initialized with SimplePipeline")
-
-    def can_parse(self, file_path: str) -> bool:
-        """检查是否可以解析该文件
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            bool: 是否支持该文件格式
-        """
-        return any(file_path.lower().endswith(fmt) for fmt in self.supported_formats)
 
     async def parse(self, file_path: str) -> DocumentData:
         """异步解析DOCX文件
@@ -71,7 +60,7 @@ class DocxDocumentParser(DocumentParser):
             file_path: DOCX文件路径
 
         Returns:
-            ParseResult: 解析结果，包含标题、内容、处理时间和错误信息
+            DocumentData: 解析结果，包含标题、内容、处理时间和错误信息
         """
         start_time = time.time()
         try:

@@ -4,13 +4,13 @@ from typing import Any
 from sanic import Sanic
 
 from enhancers.information_enhancer import InformationEnhancerFactory
+from parsers import get_parser
 from parsers.base_models import ChunkData
-from parsers.document_parser import DocumentParserFactory
 
 
 async def worker(app: Sanic) -> dict[str, Any]:
     # 使用工厂获取合适的解析器
-    parser_factory = DocumentParserFactory()
+
     enhancer_factory = InformationEnhancerFactory()
     redis = app.ctx.redis
     while True:
@@ -19,7 +19,10 @@ async def worker(app: Sanic) -> dict[str, Any]:
             await asyncio.sleep(1)
             continue
         file_path = task.get("file_path")
-        parse_result = await parser_factory.parse_document(file_path)
+        parser = get_parser(file_path)
+        if not parser:
+            continue
+        parse_result = await parser.parse(file_path)
         if not parse_result.success:
             continue
         chunk_list = parse_result.texts + parse_result.tables + parse_result.images + parse_result.formulas

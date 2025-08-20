@@ -23,9 +23,9 @@ from parsers.base_models import (
     ChunkData,
     ChunkType,
     DocumentData,
-    DocumentParser,
     TableDataItem,
 )
+from parsers.parser_registry import DocumentParser, register_parser
 
 # 忽略 openpyxl 的特定警告
 warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
@@ -49,6 +49,7 @@ class ExcelParseError(Exception):
     pass
 
 
+@register_parser(['.xlsx', '.xls'])
 class ExcelParser(DocumentParser):
     """Excel文件解析器类"""
 
@@ -61,17 +62,6 @@ class ExcelParser(DocumentParser):
         super().__init__()
         self.config: ExcelParseConfig = config or ExcelParseConfig()
         self.image_index: int = 0
-        self.supported_formats: list[str] = ['.xlsx', '.xls']
-
-    def can_parse(self, file_path: str) -> bool:
-        """
-        验证输入文件
-        Args:
-            file_path: 文件路径
-        Returns:
-            bool: 是否支持解析
-        """
-        return any(file_path.lower().endswith(fmt) for fmt in self.supported_formats)
 
     async def parse(self, excel_path: str) -> DocumentData:
         """
@@ -183,7 +173,7 @@ class ExcelParser(DocumentParser):
         Args:
             img_obj: 图片对象
         Returns:
-            Optional[DocumentData]: 图片信息，处理失败时返回None
+            ChunkData|None: 图片信息，处理失败时返回None
         """
         try:
             # 获取图片数据
