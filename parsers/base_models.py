@@ -26,13 +26,13 @@ class TableDataItem(BaseModel):
 class ChunkData(BaseModel):
     """块数据类"""
     type: ChunkType
-    name: str
-    content: str|TableDataItem = ""
-    description: str = ""
+    name: str|None = None
+    content: str|TableDataItem|None = None
+    description: str|None = None
 
 class DocumentData(BaseModel):
     """解析结果类"""
-    title: str = ""
+    title: str|None = None
     texts: list[ChunkData] = Field(default_factory=list)
     tables: list[ChunkData] = Field(default_factory=list)
     images: list[ChunkData] = Field(default_factory=list)
