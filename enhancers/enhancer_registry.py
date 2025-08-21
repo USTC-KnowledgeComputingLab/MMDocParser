@@ -7,6 +7,7 @@
 import logging
 from collections.abc import Callable
 
+from config import settings
 from enhancers.base_models import InformationEnhancer
 from parsers.base_models import ChunkType
 
@@ -67,7 +68,11 @@ def get_enhancer(modality: ChunkType) -> InformationEnhancer | None:
 
     enhancer_class = ENHANCER_REGISTRY[modality_type]
     try:
-        return enhancer_class()
+        match modality_type:
+            case ChunkType.IMAGE.value.lower():
+                return enhancer_class(settings.VLLM_MODEL_NAME, settings.VLLM_BASE_URL, settings.VLLM_API_KEY)
+            case _:
+                return enhancer_class(settings.LLM_MODEL_NAME, settings.LLM_BASE_URL, settings.LLM_API_KEY)
     except Exception as e:
         logger.error(f"创建信息增强器实例失败: {enhancer_class.__name__}, 错误: {e}")
         return None
