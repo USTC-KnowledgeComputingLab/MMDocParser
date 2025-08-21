@@ -33,4 +33,13 @@ class Settings:
     MAX_FILES_PER_REQUEST: int = int(os.getenv("MAX_FILES_PER_REQUEST", "20"))
     TASK_TIMEOUT: int = int(os.getenv("TASK_TIMEOUT", "3600"))  # 1小时
 
+    # 模型配置
+    LLM_MODEL_NAME: str = os.getenv("LLM_MODEL_NAME", "gpt-4o")
+    LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "http://192.168.120.2:4000")
+    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "sk-")
+
+    VLLM_MODEL_NAME: str = os.getenv("VLLM_MODEL_NAME", "qwen2.5-vl-7b-instruct")
+    VLLM_API_KEY: str = os.getenv("VLLM_API_KEY", "sk-")
+    VLLM_BASE_URL: str = os.getenv("VLLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+
 settings = Settings()
