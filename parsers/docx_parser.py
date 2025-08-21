@@ -8,7 +8,7 @@ DOCX文档解析器模块
 import asyncio
 import logging
 import time
-
+from pathlib import Path
 from docling.datamodel.base_models import InputFormat
 from docling.document_converter import DocumentConverter, WordFormatOption
 from docling.pipeline.simple_pipeline import SimplePipeline
@@ -31,6 +31,9 @@ from parsers.base_models import (
     DocumentData,
     DocumentParser,
     TableDataItem,
+    ImageDataItem,
+    TextDataItem,
+    FormulaDataItem
 )
 from parsers.parser_registry import register_parser
 
@@ -54,7 +57,7 @@ class DocxDocumentParser(DocumentParser):
         )
         logger.debug("DocxDocumentParser initialized with SimplePipeline")
 
-    async def parse(self, file_path: str) -> DocumentData:
+    async def parse(self, file_path: Path) -> DocumentData:
         """异步解析DOCX文件
 
         Args:
@@ -69,16 +72,6 @@ class DocxDocumentParser(DocumentParser):
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, self._converter.convert, file_path)
             doc_data = result.document
-
-            # 确保文档数据包含所有必要的属性
-            if not hasattr(doc_data, 'name'):
-                doc_data.name = 'Unknown Document'
-            if not hasattr(doc_data, 'texts'):
-                doc_data.texts = []
-            if not hasattr(doc_data, 'pictures'):
-                doc_data.pictures = []
-            if not hasattr(doc_data, 'tables'):
-                doc_data.tables = []
 
             title = self._extract_title(doc_data)
             images = self._extract_images(doc_data.pictures)
@@ -117,20 +110,18 @@ class DocxDocumentParser(DocumentParser):
         """
         image_items = []
         for idx, picture in enumerate(pictures):
-            image_uri = ""
-            if hasattr(picture, 'image') and picture.image and hasattr(picture.image, 'uri'):
-                image_uri = str(picture.image.uri)
-
-            caption = ""
-            if hasattr(picture, 'captions') and picture.captions:
-                caption = str(picture.captions[0])
-
+            image_uri = str(picture.image.uri)
+            caption = [caption.cref for caption in picture.captions]
+            footnote = [footnote.cref for footnote in picture.footnotes]
             image_items.append(
                 ChunkData(
                     type=ChunkType.IMAGE,
-                    name=getattr(picture, 'self_ref', None) or f"#/pictures/{idx}",
-                    content=image_uri,
-                    description=caption
+                    name=f"#/pictures/{idx}",
+                    content=ImageDataItem(
+                        uri=image_uri,
+                        caption=caption,
+                        footnote=footnote
+                    )
                 )
             )
 
@@ -145,32 +136,22 @@ class DocxDocumentParser(DocumentParser):
         Returns:
             List[ChunkData]: 表格列表
         """
-        # 添加安全检查，确保 tables 参数存在且可迭代
-        if not tables or not hasattr(tables, '__iter__'):
-            return []
-
         table_items: list[ChunkData] = []
         for table in tables:
-            if not hasattr(table, 'data') or not hasattr(table.data, 'grid'):
-                continue
-            if len(table.data.grid) == 0:
-                continue
-
-            table_cells = table.data.grid
-            row_headers = [cell.text for cell in table_cells[0] if cell.row_header]
-            column_headers = [cell.text for cell in table_cells[0] if cell.column_header]
-            data = [[cell.text for cell in row] for row in table_cells[1:]]
+            caption = [caption.cref for caption in table.captions]
+            footnote = [footnote.cref for footnote in table.footnotes]
+            grid = [[cell.text if cell.text else '' for cell in row] for row in table.data.grid]
             table_data = TableDataItem(
                 rows=table.data.num_rows,
                 columns=table.data.num_cols,
-                row_headers=row_headers,
-                column_headers=column_headers,
-                data=data
+                grid=grid,
+                caption=caption,
+                footnote=footnote
             )
             table_items.append(
                 ChunkData(
                     type=ChunkType.TABLE,
-                    name=getattr(table, 'self_ref', None) or f"table-{len(table_items)}",
+                    name=f"#/tables/{len(table_items)}",
                     content=table_data
                 )
             )
@@ -212,16 +193,20 @@ class DocxDocumentParser(DocumentParser):
                     text_items.append(
                         ChunkData(
                             type=ChunkType.FORMULA,
-                            name=item.self_ref or f"formula-{len(text_items)}",
-                            content=item.text
+                            name=f"formula-{len(text_items)}",
+                            content=FormulaDataItem(
+                                text=item.text
+                            )
                         )
                     )
                 case _:
                     text_items.append(
                         ChunkData(
                             type=ChunkType.TEXT,
-                            name=f"text-{len(text_items)}",
-                            content=item.text
+                            name=f"#/texts/{len(text_items)}",
+                            content=TextDataItem(
+                                text=item.text
+                            )
                         )
                     )
         return text_items

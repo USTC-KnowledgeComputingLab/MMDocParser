@@ -16,6 +16,8 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pydantic>=2.11.7",
     "docling>=2.45.0",
+    "mineru[core]>=2.1.11",
+    "beautifulsoup4>=4.13.4",
 ]
 
 [dependency-groups]

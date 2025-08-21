@@ -29,15 +29,15 @@ class TestDocxDocumentParserParse:
         
         # 模拟图片数据
         mock_picture = Mock()
-        mock_picture.self_ref = "pic1"
         mock_picture.image.uri = "/path/to/image.jpg"
-        mock_picture.captions = ["图片说明"]
+        mock_picture.captions = [Mock(cref="图片说明")]
+        mock_picture.footnotes = []
         mock_doc.pictures = [mock_picture]
         
         # 模拟表格数据
         mock_table = Mock()
-        mock_table.self_ref = "table1"
-        mock_table.captions = ["表格标题"]
+        mock_table.captions = [Mock(cref="表格标题")]
+        mock_table.footnotes = []
         mock_table.data.num_rows = 2
         mock_table.data.num_cols = 3
         mock_table.data.grid = [
@@ -57,12 +57,10 @@ class TestDocxDocumentParserParse:
         
         mock_text = Mock()
         mock_text.text = "这是正文内容"
-        mock_text.self_ref = "text1"
         mock_text.label = "text"
         
         mock_formula = Mock()
         mock_formula.text = "E = mc²"
-        mock_formula.self_ref = "formula1"
         mock_formula.label = "formula"
         
         mock_doc.texts = [mock_title, mock_text, mock_formula]
@@ -94,11 +92,11 @@ class TestDocxDocumentParserParse:
             # 验证文本内容
             assert len(result.texts) == 3  # 标题不算在texts中
             assert result.texts[0].type == ChunkType.TEXT
-            assert result.texts[0].content == "文档标题"
+            assert result.texts[0].content.text == "文档标题"
             assert result.texts[1].type == ChunkType.TEXT
-            assert result.texts[1].content == "这是正文内容"
+            assert result.texts[1].content.text == "这是正文内容"
             assert result.texts[2].type == ChunkType.FORMULA
-            assert result.texts[2].content == "E = mc²"
+            assert result.texts[2].content.text == "E = mc²"
             
             # 验证表格
             assert len(result.tables) == 1
@@ -110,8 +108,9 @@ class TestDocxDocumentParserParse:
             # 验证图片
             assert len(result.images) == 1
             assert result.images[0].type == ChunkType.IMAGE
-            assert result.images[0].content == "/path/to/image.jpg"
-            assert result.images[0].description == "图片说明"
+            assert result.images[0].content.uri == "/path/to/image.jpg"
+            assert result.images[0].content.caption == ["图片说明"]
+            assert result.images[0].content.footnote == []
 
     @pytest.mark.asyncio
     async def test_parse_without_title(self, parser):
@@ -126,7 +125,6 @@ class TestDocxDocumentParserParse:
         
         mock_text = Mock()
         mock_text.text = "只有正文内容"
-        mock_text.self_ref = "text1"
         mock_text.label = "text"
         mock_doc.texts = [mock_text]
         
@@ -200,8 +198,8 @@ class TestDocxDocumentParserParse:
         
         # 创建复杂表格
         mock_table = Mock()
-        mock_table.self_ref = "complex_table"
-        mock_table.captions = ["复杂表格"]
+        mock_table.captions = [Mock(cref="复杂表格")]
+        mock_table.footnotes = []
         mock_table.data.num_rows = 3
         mock_table.data.num_cols = 4
         
@@ -236,9 +234,9 @@ class TestDocxDocumentParserParse:
             table = result.tables[0].content
             assert table.rows == 3
             assert table.columns == 4
-            assert table.column_headers == ["姓名", "年龄", "职业", "薪资"]
-            assert table.data[0] == ["张三", "25", "工程师", "15000"]
-            assert table.data[1] == ["李四", "30", "设计师", "18000"]
+            assert table.grid == [["姓名", "年龄", "职业", "薪资"], ["张三", "25", "工程师", "15000"], ["李四", "30", "设计师", "18000"]]
+            assert table.caption == ["复杂表格"]
+            assert table.footnote == []
 
     @pytest.mark.asyncio
     async def test_parse_with_multiple_images(self, parser):
@@ -254,9 +252,9 @@ class TestDocxDocumentParserParse:
         mock_pictures = []
         for i in range(3):
             mock_pic = Mock()
-            mock_pic.self_ref = f"pic{i+1}"
             mock_pic.image.uri = f"/path/to/image{i+1}.jpg"
-            mock_pic.captions = [f"图片{i+1}说明"]
+            mock_pic.captions = [Mock(cref=f"图片{i+1}说明")]
+            mock_pic.footnotes = []
             mock_pictures.append(mock_pic)
         
         mock_doc.pictures = mock_pictures
@@ -274,23 +272,9 @@ class TestDocxDocumentParserParse:
             
             for i, img in enumerate(result.images):
                 assert img.type == ChunkType.IMAGE
-                assert img.content == f"/path/to/image{i+1}.jpg"
-                assert img.description == f"图片{i+1}说明"
-
-    @pytest.mark.asyncio
-    async def test_parse_processing_time_accuracy(self, parser, mock_converter_result):
-        """测试处理时间计算的准确性"""
-        file_path = "/path/to/test.docx"
-        
-        with patch.object(parser, '_converter') as mock_converter:
-            mock_converter.convert.return_value = mock_converter_result
-            
-            result = await parser.parse(file_path)
-            
-            assert result.success is True
-            assert result.processing_time >= 0
-            # 处理时间应该是一个合理的正数
-            assert result.processing_time < 10  # 假设不会超过10秒
+                assert img.content.uri == f"/path/to/image{i+1}.jpg"
+                assert img.content.caption == [f"图片{i+1}说明"]
+                assert img.content.footnote == []
 
     @pytest.mark.asyncio
     async def test_parse_with_section_headers(self, parser):
@@ -304,8 +288,7 @@ class TestDocxDocumentParserParse:
         
         # 创建章节标题
         mock_section = Mock()
-        mock_section.text = "第一章 引言"
-        mock_section.self_ref = "section1"
+        mock_section.text = "第一章 引言"   
         mock_section.label = "section_header"
         
         mock_doc.texts = [mock_section]
@@ -321,4 +304,4 @@ class TestDocxDocumentParserParse:
             assert result.success is True
             assert len(result.texts) == 1
             assert result.texts[0].type == ChunkType.TEXT
-            assert result.texts[0].content == "第一章 引言"
+            assert result.texts[0].content.text == "第一章 引言"

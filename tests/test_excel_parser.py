@@ -1,7 +1,7 @@
 import base64
 import os
 import tempfile
-
+from pathlib import Path
 import pytest
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
@@ -40,6 +40,7 @@ async def test_parse_real_basic_and_image():
         ws2["A2"] = "Single Data"
 
         xlsx_fd, xlsx_path = tempfile.mkstemp(suffix=".xlsx")
+        xlsx_path = Path(xlsx_path)
         os.close(xlsx_fd)
         wb.save(xlsx_path)
 
@@ -59,7 +60,7 @@ async def test_parse_real_basic_and_image():
             assert result.texts[0].type == "text" and result.texts[0].name == "Sheet1"
             assert result.images[0].type == "image"
             assert result.images[0].name == "#/pictures/0"
-            assert result.images[0].content.startswith("data:image/")
+            assert result.images[0].content.uri.startswith("data:image/")
 
             assert result.tables[0].type == "table"
             assert result.texts[1].type == "text" and result.texts[1].name == "Sheet2"
@@ -85,6 +86,7 @@ async def test_parse_real_merged_cells():
     ws["B2"] = "Value2"
 
     xlsx_fd, xlsx_path = tempfile.mkstemp(suffix=".xlsx")
+    xlsx_path = Path(xlsx_path)
     os.close(xlsx_fd)
     wb.save(xlsx_path)
 
@@ -102,8 +104,7 @@ async def test_parse_real_merged_cells():
         assert table_chunk.type == "table"
 
         payload = table_chunk.content
-        assert payload.row_headers == ["Merged Header", "Merged Header"]
-        assert payload.data == [["Value1", "Value2"]]
+        assert payload.grid == [["Merged Header", "Merged Header"], ["Value1", "Value2"]]
         assert payload.rows == 2
         assert payload.columns == 2
     finally:

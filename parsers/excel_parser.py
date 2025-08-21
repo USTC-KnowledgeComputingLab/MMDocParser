@@ -25,6 +25,8 @@ from parsers.base_models import (
     DocumentData,
     DocumentParser,
     TableDataItem,
+    TextDataItem,
+    ImageDataItem
 )
 from parsers.parser_registry import register_parser
 
@@ -64,7 +66,7 @@ class ExcelParser(DocumentParser):
         self.config: ExcelParseConfig = config or ExcelParseConfig()
         self.image_index: int = 0
 
-    async def parse(self, file_path: str) -> DocumentData:
+    async def parse(self, file_path: Path) -> DocumentData:
         """
         将Excel文件转换为JSON格式
         Args:
@@ -92,8 +94,9 @@ class ExcelParser(DocumentParser):
                 texts.append(ChunkData(
                     type=ChunkType.TEXT,
                     name=sheet_name,
-                    content=f"工作表 {sheet_index + 1}: {sheet_name}",
-                    description="工作表标题"
+                    content=TextDataItem(
+                        text=f"工作表 {sheet_index + 1}: {sheet_name}",
+                    ),
                 ))
 
                 # 处理图片
@@ -104,9 +107,8 @@ class ExcelParser(DocumentParser):
                 table_content = self._extract_table_data(sheet)
                 tables.append(ChunkData(
                     type=ChunkType.TABLE,
-                    name="表格",
-                    content=table_content,
-                    description="表格"
+                    name=f"#/tables/{sheet_index}",
+                    content=table_content
                 ))
             processing_time = time.time() - start_time
             return DocumentData(
@@ -125,7 +127,7 @@ class ExcelParser(DocumentParser):
                 processing_time=processing_time
             )
 
-    def _load_workbook(self, excel_path: str) -> Workbook:
+    def _load_workbook(self, excel_path: Path) -> Workbook:
         """
         加载Excel工作簿
         Args:
@@ -191,8 +193,9 @@ class ExcelParser(DocumentParser):
             image_info = ChunkData(
                 type=ChunkType.IMAGE,
                 name=f"#/pictures/{self.image_index}",
-                content=uri,
-                description=self.config.image_description_placeholder
+                content=ImageDataItem(
+                    uri=uri
+                )
             )
 
             self.image_index += 1
@@ -263,8 +266,7 @@ class ExcelParser(DocumentParser):
         return TableDataItem(
             rows=len(all_rows),
             columns=max_col,
-            row_headers=all_rows[0] if all_rows else [],
-            data=all_rows[1:] if len(all_rows) > 1 else []
+            grid=all_rows
         )
 
     def _get_merged_cells(self, sheet: Worksheet) -> dict[tuple[int, int, int, int], str]:
