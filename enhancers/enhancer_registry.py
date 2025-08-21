@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 ENHANCER_REGISTRY: dict[str, type[InformationEnhancer]] = {}
 
 
-def register_enhancer(modalities: list[str]) -> Callable[[type[InformationEnhancer]], type[InformationEnhancer]]:
+def register_enhancer(modalities: list[ChunkType]) -> Callable[[type[InformationEnhancer]], type[InformationEnhancer]]:
     """
     信息增强器注册装饰器
 
@@ -38,16 +38,16 @@ def register_enhancer(modalities: list[str]) -> Callable[[type[InformationEnhanc
 
         # 注册到全局注册表
         for modality in modalities:
-            modality = modality.lower()  # 统一转换为小写
+            modality = modality.value.lower()  # 统一转换为小写
             if modality in ENHANCER_REGISTRY:
-                logger.warning(f"覆盖已存在的信息增强器: {modality} -> {cls.__name__}")
+                logger.error(f"覆盖已存在的信息增强器: {modality} -> {cls.__name__}")
+                raise ValueError(f"尝试覆盖已存在的信息增强器: {modality} -> {cls.__name__}")
             ENHANCER_REGISTRY[modality] = cls
             logger.info(f"注册信息增强器: {modality} -> {cls.__name__}")
 
         return cls
 
     return decorator
-
 
 def get_enhancer(modality: ChunkType) -> InformationEnhancer | None:
     """
