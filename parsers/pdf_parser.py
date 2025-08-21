@@ -14,16 +14,17 @@ import time
 from pathlib import Path
 from typing import Any
 
+import aiofiles  # type: ignore
 from bs4 import BeautifulSoup
 from loguru import logger
-from mineru.backend.pipeline.model_json_to_middle_json import (
-    result_to_middle_json as pipeline_result_to_middle_json,  # type: ignore
+from mineru.backend.pipeline.model_json_to_middle_json import (  # type: ignore
+    result_to_middle_json as pipeline_result_to_middle_json,
 )
-from mineru.backend.pipeline.pipeline_analyze import (
-    doc_analyze as pipeline_doc_analyze,  # type: ignore
+from mineru.backend.pipeline.pipeline_analyze import (  # type: ignore
+    doc_analyze as pipeline_doc_analyze,
 )
-from mineru.backend.pipeline.pipeline_middle_json_mkcontent import (
-    union_make as pipeline_union_make,  # type: ignore
+from mineru.backend.pipeline.pipeline_middle_json_mkcontent import (  # type: ignore
+    union_make as pipeline_union_make,
 )
 from mineru.cli.common import prepare_env, read_fn  # type: ignore
 from mineru.data.data_reader_writer import FileBasedDataWriter  # type: ignore
@@ -61,11 +62,6 @@ class PdfDocumentParser(DocumentParser):
 
     async def parse(self, file_path: Path) -> DocumentData:
         start_time = time.time()
-        title = file_path.stem
-        texts_chunks = []
-        tables_chunks = []
-        images_chunks = []
-        formulas_chunks = []
         try:
             # 执行同步转换（在异步中运行）
             pdf_file_name = file_path.stem
@@ -76,48 +72,65 @@ class PdfDocumentParser(DocumentParser):
                 self._parse_pdf_to_content_list,
                 file_path, local_image_dir, self.lang, self.parse_method, self.formula_enable, self.table_enable
             )
-            for idx, item in enumerate(content_list):
-                if item["type"] == "image":
-                    image_chunk = self._process_image(idx, item)
-                    if image_chunk:
-                        images_chunks.append(image_chunk)
-                elif item["type"] == "table":
-                    table_chunk = self._process_table(idx, item)
-                    if table_chunk:
-                        tables_chunks.append(table_chunk)
-                elif item["type"] == "equation":
-                    formula_chunk = self._process_formula(idx, item)
-                    if formula_chunk:
-                        formulas_chunks.append(formula_chunk)
-                elif item["type"] == "text":
-                    if item.get("text_level") == 1:
-                        title = item.get("text", "")
-                        continue
-                    text_chunk = self._process_text(idx, item)
-                    if text_chunk:
-                        texts_chunks.append(text_chunk)
+
+            # 执行并行处理
+            document_data = await self._process_content_parallel(file_path, content_list)
 
             shutil.rmtree(local_image_dir, ignore_errors=True)
             processing_time = time.time() - start_time
+            document_data.processing_time = processing_time
             logger.info(f"Successfully parsed DOCX: {file_path} (took {processing_time:.2f}s)")
-            return DocumentData(
+            return document_data
+
+        except Exception as e:
+            raise Exception(f"Failed to parse PDF file {file_path}: {type(e).__name__}: {e}") from e
+
+    async def _process_content_parallel(self, file_path: Path, content_list: list[dict[str, Any]]) -> DocumentData:
+        # 创建任务列表
+        tasks = []
+        title = file_path.stem
+        texts_chunks: list[ChunkData] = []
+        tables_chunks: list[ChunkData] = []
+        images_chunks: list[ChunkData] = []
+        formulas_chunks: list[ChunkData] = []
+
+        for idx, item in enumerate(content_list):
+            if item["type"] == "image":
+                tasks.append(self._process_image(idx, item))
+            elif item["type"] == "table":
+                tasks.append(self._process_table_async(idx, item))
+            elif item["type"] == "equation":
+                tasks.append(self._process_formula_async(idx, item))
+            elif item["type"] == "text":
+                if item.get("text_level") == 1:
+                    title = item.get("text", "")
+                    continue
+                tasks.append(self._process_text_async(idx, item))
+
+        # 并行执行所有任务
+        if tasks:
+            results = await asyncio.gather(*tasks)
+
+            # 处理结果，过滤掉 None 和异常
+            for result in results:
+                if result is None:
+                    continue
+
+                if result.type == ChunkType.IMAGE:
+                    images_chunks.append(result)
+                elif result.type == ChunkType.TABLE:
+                    tables_chunks.append(result)
+                elif result.type == ChunkType.FORMULA:
+                    formulas_chunks.append(result)
+                elif result.type == ChunkType.TEXT:
+                    texts_chunks.append(result)
+        return DocumentData(
                 title=title,
                 texts=texts_chunks,
                 tables=tables_chunks,
                 images=images_chunks,
                 formulas=formulas_chunks,
-                processing_time=processing_time,
                 success=True
-            )
-
-        except Exception as e:
-            processing_time = time.time() - start_time
-            error_msg = f"Failed to parse DOCX file {file_path}: {type(e).__name__}: {e}"
-            logger.exception(error_msg)  # 记录完整堆栈
-            return DocumentData(
-                success=False,
-                error_message=str(e),
-                processing_time=processing_time
             )
 
     def _parse_pdf_to_content_list(
@@ -172,12 +185,14 @@ class PdfDocumentParser(DocumentParser):
             raise
         return list(content_list)
 
-    def _process_image(self, idx:int,image:dict[str, Any]) -> ChunkData|None:
+    async def _process_image(self, idx:int,image:dict[str, Any]) -> ChunkData|None:
         if not image.get("img_path") or not os.path.exists(str(image.get("img_path"))):
             return None
         image_path = Path(str(image.get("img_path")))
-        with open(image_path, "rb") as img_file:
-            img_data = img_file.read()
+
+        async with aiofiles.open(image_path, 'rb') as img_file:
+            img_data = await img_file.read()
+
             base64_data = base64.b64encode(img_data).decode("utf-8")
             ext = os.path.splitext(image_path.name)[1].lower()
             mime_type = "image/jpeg"
@@ -185,17 +200,35 @@ class PdfDocumentParser(DocumentParser):
                 mime_type = "image/png"
             elif ext == ".gif":
                 mime_type = "image/gif"
-        return ChunkData(
-            type=ChunkType.IMAGE,
-            name=f"#/pictures/{idx}",
-            content=ImageDataItem(
-                uri=f"data:{mime_type};base64,{base64_data}",
-                caption=image.get("img_caption", []),
-                footnote=image.get("img_footnote", [])
+
+            return ChunkData(
+                type=ChunkType.IMAGE,
+                name=f"#/pictures/{idx}",
+                content=ImageDataItem(
+                    uri=f"data:{mime_type};base64,{base64_data}",
+                    caption=image.get("img_caption", []),
+                    footnote=image.get("img_footnote", [])
+                )
             )
-        )
+
+
+    async def _process_table_async(self, idx:int, table:dict[str, Any]) -> ChunkData|None:
+        """异步处理表格（在线程池中执行）"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._process_table, idx, table)
+
+    async def _process_formula_async(self, idx:int, formula:dict[str, Any]) -> ChunkData|None:
+        """异步处理公式（在线程池中执行）"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._process_formula, idx, formula)
+
+    async def _process_text_async(self, idx:int, text:dict[str, Any]) -> ChunkData|None:
+        """异步处理文本（在线程池中执行）"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._process_text, idx, text)
 
     def _process_table(self, idx:int,table:dict[str, Any]) -> ChunkData|None:
+        """同步处理表格"""
         html_str = table.get("table_body", "")
         soup = BeautifulSoup(html_str, 'html.parser')
         table_body = soup.find('table')
@@ -265,8 +298,8 @@ class PdfDocumentParser(DocumentParser):
             content=table_data
         )
 
-
     def _process_formula(self, idx:int,formula:dict[str, Any]) -> ChunkData|None:
+        """同步处理公式"""
         if not formula.get("text") or formula.get("text") == "":
             return None
         return ChunkData(
@@ -279,6 +312,7 @@ class PdfDocumentParser(DocumentParser):
         )
 
     def _process_text(self, idx:int,text:dict[str, Any]) -> ChunkData|None:
+        """同步处理文本"""
         if not text.get("text") or text.get("text") == "":
             return None
         return ChunkData(

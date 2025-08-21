@@ -176,15 +176,9 @@ class TestDocxDocumentParserParse:
         with patch.object(parser, '_converter') as mock_converter:
             mock_converter.convert.side_effect = Exception("转换失败")
             
-            result = await parser.parse(file_path)
+            with pytest.raises(Exception, match="Failed to parse DOCX file /path/to/invalid.docx"):
+                await parser.parse(Path(file_path))
             
-            assert result.success is False
-            assert result.error_message == "转换失败"
-            assert result.processing_time > 0
-            assert result.title is None
-            assert len(result.texts) == 0
-            assert len(result.tables) == 0
-            assert len(result.images) == 0
 
     @pytest.mark.asyncio
     async def test_parse_with_complex_table(self, parser):

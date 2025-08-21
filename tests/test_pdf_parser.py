@@ -5,7 +5,7 @@ PDF解析器测试模块
 """
 
 import pytest
-from unittest.mock import Mock, patch, mock_open
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from parsers.pdf_parser import PdfDocumentParser
@@ -48,6 +48,28 @@ class TestPdfDocumentParserParse:
             }
         ]
 
+    def create_async_mock_file(self, read_data: bytes):
+        """创建支持异步上下文管理器的 mock 文件对象"""
+        mock_file = Mock()
+        
+        # 创建异步 read 方法
+        async def async_read():
+            return read_data
+        
+        mock_file.read = async_read
+        
+        # 创建异步上下文管理器
+        async def async_enter(self):
+            return mock_file
+        
+        async def async_exit(self, exc_type, exc_val, exc_tb):
+            pass
+        
+        mock_file.__aenter__ = async_enter
+        mock_file.__aexit__ = async_exit
+        
+        return mock_file
+
     @pytest.mark.asyncio
     async def test_parse_success(self, parser, mock_content_list):
         """测试成功解析PDF文件"""
@@ -55,20 +77,22 @@ class TestPdfDocumentParserParse:
         
         with patch.object(parser, '_parse_pdf_to_content_list') as mock_parse:
             mock_parse.return_value = mock_content_list
-            # 使用 mock_open 模拟图片文件的读取
-            with patch('builtins.open', mock_open(read_data=b'test_image_content')):
-                result = await parser.parse(file_path)
-                
-                # 验证返回结果
-                assert result.success is True
-                assert result.title == "文档标题"
-                assert result.processing_time > 0
-                assert result.error_message is None
-                
-                # 验证内容数量
-                assert len(result.texts) == 1  # 标题 + 内容
-                assert len(result.tables) == 1
-                assert len(result.images) == 1
+            # 使用异步 mock 模拟图片文件的读取
+            async_mock_file = self.create_async_mock_file(b'test_image_content')
+            with patch('aiofiles.open', return_value=async_mock_file):
+                with patch('os.path.exists', return_value=True):
+                    result = await parser.parse(file_path)
+                    
+                    # 验证返回结果
+                    assert result.success is True
+                    assert result.title == "文档标题"
+                    assert result.processing_time > 0
+                    assert result.error_message is None
+                    
+                    # 验证内容数量
+                    assert len(result.texts) == 1  # 只有 text_level != 1 的文本会被处理
+                    assert len(result.tables) == 1
+                    assert len(result.images) == 1
 
     @pytest.mark.asyncio
     async def test_parse_error_handling(self, parser):
@@ -76,13 +100,9 @@ class TestPdfDocumentParserParse:
         file_path = Path("/path/to/invalid.pdf")
         
         with patch.object(parser, '_parse_pdf_to_content_list') as mock_parse:
-            mock_parse.side_effect = Exception("PDF解析失败")
-            
-            result = await parser.parse(file_path)
-            
-            assert result.success is False
-            assert result.error_message == "PDF解析失败"
-            assert result.processing_time > 0
+            mock_parse.side_effect = Exception("解析失败")
+            with pytest.raises(Exception, match="解析失败"):
+                await parser.parse(Path(file_path))
 
     @pytest.mark.asyncio
     async def test_parse_empty_document(self, parser):
@@ -116,18 +136,20 @@ class TestPdfDocumentParserParse:
         
         with patch.object(parser, '_parse_pdf_to_content_list') as mock_parse:
             mock_parse.return_value = mock_content
-            # 模拟不同格式的图片文件
-            with patch('builtins.open', mock_open(read_data=b'fake_jpeg_data')):
-                result = await parser.parse(file_path)
-                
-                assert result.success is True
-                assert len(result.images) == 1
-                
-                # 验证图片内容
-                image = result.images[0]
-                assert image.type == ChunkType.IMAGE
-                assert "data:image/jpeg;base64," in image.content.uri
-                assert image.content.caption == ["测试图片"]
+            # 使用异步 mock 模拟图片文件，并确保文件路径存在
+            async_mock_file = self.create_async_mock_file(b'fake_jpeg_data')
+            with patch('aiofiles.open', return_value=async_mock_file):
+                with patch('os.path.exists', return_value=True):
+                    result = await parser.parse(Path(file_path))
+                    
+                    assert result.success is True
+                    assert len(result.images) == 1
+                    
+                    # 验证图片内容
+                    image = result.images[0]
+                    assert image.type == ChunkType.IMAGE
+                    assert "data:image/jpeg;base64," in image.content.uri
+                    assert image.content.caption == ["测试图片"]
 
     @pytest.mark.asyncio
     async def test_parse_with_table_processing(self, parser):
@@ -146,7 +168,7 @@ class TestPdfDocumentParserParse:
         with patch.object(parser, '_parse_pdf_to_content_list') as mock_parse:
             mock_parse.return_value = mock_content
             
-            result = await parser.parse(file_path)
+            result = await parser.parse(Path(file_path))
             
             assert result.success is True
             assert len(result.tables) == 1
@@ -157,3 +179,56 @@ class TestPdfDocumentParserParse:
             assert table.content.rows == 2  # 标题行 + 数据行
             assert table.content.columns == 2
             assert table.content.caption == ["测试表格"]
+
+    @pytest.mark.asyncio
+    async def test_parse_with_formula_processing(self, parser):
+        """测试公式处理功能"""
+        file_path = Path("/path/to/formula.pdf")
+        
+        mock_content = [
+            {
+                "type": "equation",
+                "text": "E = mc²",
+                "text_format": "latex"
+            }
+        ]
+        
+        with patch.object(parser, '_parse_pdf_to_content_list') as mock_parse:
+            mock_parse.return_value = mock_content
+            
+            result = await parser.parse(Path(file_path))
+            
+            assert result.success is True
+            assert len(result.formulas) == 1
+            
+            # 验证公式内容
+            formula = result.formulas[0]
+            assert formula.type == ChunkType.FORMULA
+            assert formula.content.text == "E = mc²"
+            assert formula.content.text_format == "latex"
+
+    @pytest.mark.asyncio
+    async def test_parse_with_mixed_content(self, parser):
+        """测试混合内容处理功能"""
+        file_path = Path("/path/to/mixed.pdf")
+        
+        mock_content = [
+            {"type": "text", "text": "标题", "text_level": 1},
+            {"type": "image", "img_path": "/path/to/img.jpg", "img_caption": [], "img_footnote": []},
+            {"type": "table", "table_body": "<table><tr><td>数据</td></tr></table>", "table_caption": [], "table_footnote": []},
+            {"type": "equation", "text": "x + y = z", "text_format": "latex"}
+        ]
+        
+        with patch.object(parser, '_parse_pdf_to_content_list') as mock_parse:
+            mock_parse.return_value = mock_content
+            # 使用异步 mock 模拟图片文件，并确保文件路径存在
+            async_mock_file = self.create_async_mock_file(b'mixed_content_image')
+            with patch('aiofiles.open', return_value=async_mock_file):
+                with patch('os.path.exists', return_value=True):
+                    result = await parser.parse(Path(file_path))
+                    
+                    assert result.success is True
+                    assert len(result.texts) == 0  # text_level=1 的文本被用作标题，不进入 texts 列表
+                    assert len(result.images) == 1
+                    assert len(result.tables) == 1
+                    assert len(result.formulas) == 1
