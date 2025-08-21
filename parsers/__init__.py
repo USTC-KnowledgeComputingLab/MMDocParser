@@ -1,6 +1,6 @@
 # Parsers package
 
-from .base_models import DocumentData, DocumentParser
+from .base_models import ChunkData, ChunkType, DocumentData, DocumentParser
 from .parser_registry import (
     PARSER_REGISTRY,
     get_parser,
@@ -12,6 +12,8 @@ from .parser_registry import (
 __all__ = [
     'DocumentData',
     'DocumentParser',
+    'ChunkData',
+    'ChunkType',
     'PARSER_REGISTRY',
     'register_parser',
     'get_parser',

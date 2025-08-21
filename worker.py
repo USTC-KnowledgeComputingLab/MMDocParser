@@ -3,15 +3,13 @@ from typing import Any
 
 from sanic import Sanic
 
-from enhancers.information_enhancer import InformationEnhancerFactory
-from parsers import get_parser, load_all_parsers
-from parsers.base_models import ChunkData
+from enhancers import get_enhancer
+from parsers import ChunkData, ChunkType, get_parser, load_all_parsers
 
 
 async def worker(app: Sanic) -> dict[str, Any]:
     # 使用工厂获取合适的解析器
     load_all_parsers()
-    enhancer_factory = InformationEnhancerFactory()
     redis = app.ctx.redis
     while True:
         task = await redis.get_task()
@@ -25,21 +23,29 @@ async def worker(app: Sanic) -> dict[str, Any]:
         parse_result = await parser.parse(file_path)
         if not parse_result.success:
             continue
-        chunk_list = parse_result.texts + parse_result.tables + parse_result.images + parse_result.formulas
         # 控制并发数量，防止访问量过大导致失败
-        SEMAPHORE_LIMIT = 10  # 可根据实际情况调整
+        SEMAPHORE_LIMIT = 10
         semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
 
         async def enhance_with_semaphore(chunk: ChunkData, semaphore: asyncio.Semaphore) -> ChunkData:
             async with semaphore:
-                return await enhancer_factory.enhance_information(chunk)
+                enhancer = get_enhancer(ChunkType(chunk.type))
+                if not enhancer:
+                    return chunk
+                return await enhancer.enhance(chunk)
 
-        # 并发增强每个信息
-        enhanced_chunk_list = await asyncio.gather(
-            *(enhance_with_semaphore(chunk, semaphore) for chunk in chunk_list)
-        )
-        parse_result.texts = enhanced_chunk_list[:len(parse_result.texts)]
-        parse_result.tables = enhanced_chunk_list[len(parse_result.texts):len(parse_result.texts) + len(parse_result.tables)]
-        parse_result.images = enhanced_chunk_list[len(parse_result.texts) + len(parse_result.tables):len(parse_result.texts) + len(parse_result.tables) + len(parse_result.images)]
-        parse_result.formulas = enhanced_chunk_list[len(parse_result.texts) + len(parse_result.tables) + len(parse_result.images):]
+        text_tasks = [enhance_with_semaphore(chunk, semaphore) for chunk in parse_result.texts]
+        table_tasks = [enhance_with_semaphore(chunk, semaphore) for chunk in parse_result.tables]
+        image_tasks = [enhance_with_semaphore(chunk, semaphore) for chunk in parse_result.images]
+        formula_tasks = [enhance_with_semaphore(chunk, semaphore) for chunk in parse_result.formulas]
+
+        text_chunk_list = await asyncio.gather(*text_tasks)
+        table_chunk_list = await asyncio.gather(*table_tasks)
+        image_chunk_list = await asyncio.gather(*image_tasks)
+        formula_chunk_list = await asyncio.gather(*formula_tasks)
+
+        parse_result.texts = text_chunk_list
+        parse_result.tables = table_chunk_list
+        parse_result.images = image_chunk_list
+        parse_result.formulas = formula_chunk_list
         return parse_result.model_dump(mode="json")
