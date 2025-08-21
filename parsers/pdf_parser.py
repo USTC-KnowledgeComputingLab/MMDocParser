@@ -86,43 +86,31 @@ class PdfDocumentParser(DocumentParser):
 
     async def _process_content_parallel(self, file_path: Path, content_list: list[dict[str, Any]]) -> DocumentData:
         # 创建任务列表
-        tasks = []
         title = file_path.stem
-        texts_chunks: list[TextDataItem] = []
-        tables_chunks: list[TableDataItem] = []
-        images_chunks: list[ImageDataItem] = []
-        formulas_chunks: list[FormulaDataItem] = []
+        texts_task = []
+        tables_task = []
+        images_task = []
+        formulas_task = []
 
         for idx, item in enumerate(content_list):
             if item["type"] == "image":
-                tasks.append(self._process_image(idx, item))
+                images_task.append(self._process_image(idx, item))
             elif item["type"] == "table":
-                tasks.append(self._process_table_async(idx, item))
+                tables_task.append(self._process_table_async(idx, item))
             elif item["type"] == "equation":
-                tasks.append(self._process_formula_async(idx, item))
+                formulas_task.append(self._process_formula_async(idx, item))
             elif item["type"] == "text":
                 if item.get("text_level") == 1:
                     title = item.get("text", "")
                     continue
-                tasks.append(self._process_text_async(idx, item))
+                texts_task.append(self._process_text_async(idx, item))
 
-        # 并行执行所有任务
-        if tasks:
-            results = await asyncio.gather(*tasks)
+        
+        texts_chunks = [item for item in (await asyncio.gather(*texts_task) if texts_task else []) if item is not None]
+        tables_chunks = [item for item in (await asyncio.gather(*tables_task) if tables_task else []) if item is not None]
+        images_chunks = [item for item in (await asyncio.gather(*images_task) if images_task else []) if item is not None]
+        formulas_chunks = [item for item in (await asyncio.gather(*formulas_task) if formulas_task else []) if item is not None]
 
-            # 处理结果，过滤掉 None 和异常
-            for result in results:
-                if result is None:
-                    continue
-
-                if result.type == ChunkType.IMAGE:
-                    images_chunks.append(result)
-                elif result.type == ChunkType.TABLE:
-                    tables_chunks.append(result)
-                elif result.type == ChunkType.FORMULA:
-                    formulas_chunks.append(result)
-                elif result.type == ChunkType.TEXT:
-                    texts_chunks.append(result)
         return DocumentData(
                 title=title,
                 texts=texts_chunks,
@@ -224,13 +212,17 @@ class PdfDocumentParser(DocumentParser):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._process_text, idx, text)
 
-    def _process_table(self, idx:int,table:dict[str, Any]) -> TableDataItem|None:
+    def _process_table(self, idx:int,table:dict[str, Any]) -> TableDataItem:
         """同步处理表格"""
         html_str = table.get("table_body", "")
         soup = BeautifulSoup(html_str, 'html.parser')
         table_body = soup.find('table')
         if not table_body:
-            return None
+            return TableDataItem(
+                type=ChunkType.TABLE,
+                name=f"#/tables/{idx}",
+                rows=0,
+                columns=0)
         # 使用网格处理 rowspan 和 colspan
         grid: list[list[str]] = []
         max_col = 0
@@ -299,10 +291,8 @@ class PdfDocumentParser(DocumentParser):
             footnote=table_data.footnote
         )
 
-    def _process_formula(self, idx:int,formula:dict[str, Any]) -> FormulaDataItem|None:
+    def _process_formula(self, idx:int,formula:dict[str, Any]) -> FormulaDataItem:
         """同步处理公式"""
-        if not formula.get("text") or formula.get("text") == "":
-            return None
         return FormulaDataItem(
             type=ChunkType.FORMULA,
             name=f"#/formulas/{idx}",
@@ -310,10 +300,8 @@ class PdfDocumentParser(DocumentParser):
             text_format=formula.get("text_format")
         )
 
-    def _process_text(self, idx:int,text:dict[str, Any]) -> TextDataItem|None:
+    def _process_text(self, idx:int,text:dict[str, Any]) -> TextDataItem:
         """同步处理文本"""
-        if not text.get("text") or text.get("text") == "":
-            return None
         return TextDataItem(
             type=ChunkType.TEXT,
             name=f"#/texts/{idx}",
