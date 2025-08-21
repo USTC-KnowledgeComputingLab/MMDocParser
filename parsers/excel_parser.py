@@ -22,7 +22,6 @@ from openpyxl.workbook.workbook import Workbook  # type: ignore
 from openpyxl.worksheet.worksheet import Worksheet  # type: ignore
 
 from parsers.base_models import (
-    ChunkData,
     ChunkType,
     DocumentData,
     DocumentParser,
@@ -109,9 +108,9 @@ class ExcelParser(DocumentParser):
             results = await asyncio.gather(*tasks)
 
             # 合并结果
-            texts: list[ChunkData] = []
-            tables: list[ChunkData] = []
-            images: list[ChunkData] = []
+            texts: list[TextDataItem] = []
+            tables: list[TableDataItem] = []
+            images: list[ImageDataItem] = []
 
             for result in results:
                 if result:
@@ -140,19 +139,19 @@ class ExcelParser(DocumentParser):
             sheet_images, table_content = await asyncio.gather(image_task, table_task)
 
             # 添加工作表标题
-            texts = [ChunkData(
+            texts = [TextDataItem(
                 type=ChunkType.TEXT,
                 name=sheet_name,
-                content=TextDataItem(
-                    text=f"工作表 {sheet_index + 1}: {sheet_name}",
-                ),
+                text=f"工作表 {sheet_index + 1}: {sheet_name}",
             )]
 
             # 创建表格数据
-            tables = [ChunkData(
+            tables = [TableDataItem(
                 type=ChunkType.TABLE,
                 name=f"#/tables/{sheet_index}",
-                content=table_content
+                rows=table_content.rows,
+                columns=table_content.columns,
+                grid=table_content.grid
             )] if table_content else []
 
             return {
@@ -179,7 +178,7 @@ class ExcelParser(DocumentParser):
             keep_vba=self.config.keep_vba
         )
 
-    def _extract_sheet_images(self, sheet: Worksheet) -> list[ChunkData]:
+    def _extract_sheet_images(self, sheet: Worksheet) -> list[ImageDataItem]:
         """
         提取工作表中的图片
         Args:
@@ -187,7 +186,7 @@ class ExcelParser(DocumentParser):
         Returns:
             List[DocumentData]: 图片信息列表
         """
-        sheet_images: list[ChunkData] = []
+        sheet_images: list[ImageDataItem] = []
 
         images = getattr(sheet, '_images', None)
         if not images or not isinstance(images, list|tuple):
@@ -208,7 +207,7 @@ class ExcelParser(DocumentParser):
 
         return sheet_images
 
-    def _process_image_object(self, img_obj: Image) -> ChunkData | None:
+    def _process_image_object(self, img_obj: Image) -> ImageDataItem | None:
         """
         处理单个图片对象
         Args:
@@ -228,12 +227,10 @@ class ExcelParser(DocumentParser):
             uri = f"data:image/{img_format};base64,{base64_encoded}"
 
             # 创建图片信息
-            image_info = ChunkData(
+            image_info = ImageDataItem(
                 type=ChunkType.IMAGE,
                 name=f"#/pictures/{self.image_index}",
-                content=ImageDataItem(
-                    uri=uri
-                )
+                uri=uri
             )
 
             self.image_index += 1

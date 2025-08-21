@@ -27,7 +27,6 @@ from docling_core.types.doc.document import (
 )
 
 from parsers.base_models import (
-    ChunkData,
     ChunkType,
     DocumentData,
     DocumentParser,
@@ -88,39 +87,28 @@ class DocxDocumentParser(DocumentParser):
     async def _process_content_parallel(self, doc_data: DoclingDocument) -> DocumentData:
         """并行处理文档内容"""
         # 创建任务列表
-        tasks = []
+        tasks_images = []
+        tasks_tables = []
+        tasks_texts = []
 
         # 添加图片处理任务
         if doc_data.pictures:
-            tasks.append(self._extract_images_async(doc_data.pictures))
+            tasks_images.append(self._extract_images_async(doc_data.pictures))
+        images_results = await asyncio.gather(*tasks_images) if tasks_images else []
+        images = images_results[0] if images_results else []
 
         # 添加表格处理任务
         if doc_data.tables:
-            tasks.append(self._extract_tables_async(doc_data.tables))
+            tasks_tables.append(self._extract_tables_async(doc_data.tables))
+        tables_results = await asyncio.gather(*tasks_tables) if tasks_tables else []
+        tables = tables_results[0] if tables_results else []
 
         # 添加文本处理任务
         if doc_data.texts:
-            tasks.append(self._extract_texts_async(doc_data.texts))
-
-        # 并行执行所有任务
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 处理结果
-        images: list[ChunkData] = []
-        tables: list[ChunkData] = []
-        texts: list[ChunkData] = []
-
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Error processing content type {i}: {result}")
-                continue
-            if isinstance(result, list):
-                if result and result[0].type == ChunkType.IMAGE:
-                    images = result
-                elif result and result[0].type == ChunkType.TABLE:
-                    tables = result
-                elif result and result[0].type == ChunkType.TEXT:
-                    texts = result
+            tasks_texts.append(self._extract_texts_async(doc_data.texts))
+        texts_and_formulas_results = await asyncio.gather(*tasks_texts) if tasks_texts else []
+        texts_and_formulas = texts_and_formulas_results[0] if texts_and_formulas_results else ([], [])
+        texts, formulas = texts_and_formulas
 
         # 提取标题
         title = self._extract_title(doc_data)
@@ -130,19 +118,20 @@ class DocxDocumentParser(DocumentParser):
             texts=texts,
             tables=tables,
             images=images,
+            formulas=formulas,
             success=True
         )
 
-    def _extract_images(self, pictures: list[PictureItem]) -> list[ChunkData]:
+    def _extract_images(self, pictures: list[PictureItem]) -> list[ImageDataItem]:
         """提取文档中的图片
 
         Args:
             pictures: 图片列表
 
         Returns:
-            List[ChunkData]: 图片列表
+            List[ImageDataItem]: 图片列表
         """
-        image_items: list[ChunkData] = []
+        image_items: list[ImageDataItem] = []
         for idx, picture in enumerate(pictures):
             if not picture.image:
                 continue
@@ -150,20 +139,18 @@ class DocxDocumentParser(DocumentParser):
             caption = [caption.cref for caption in picture.captions]
             footnote = [footnote.cref for footnote in picture.footnotes]
             image_items.append(
-                ChunkData(
+                ImageDataItem(
                     type=ChunkType.IMAGE,
-                    name=f"#/pictures/{idx}",
-                    content=ImageDataItem(
-                        uri=image_uri,
-                        caption=caption,
-                        footnote=footnote
-                    )
+                    name=f"image-{idx}",
+                    uri=image_uri,
+                    caption=caption,
+                    footnote=footnote
                 )
             )
 
         return image_items
 
-    def _extract_tables(self, tables: list[TableItem]) -> list[ChunkData]:
+    def _extract_tables(self, tables: list[TableItem]) -> list[TableDataItem]:
         """提取文档中的表格
 
         Args:
@@ -172,23 +159,20 @@ class DocxDocumentParser(DocumentParser):
         Returns:
             List[ChunkData]: 表格列表
         """
-        table_items: list[ChunkData] = []
+        table_items: list[TableDataItem] = []
         for table in tables:
             caption = [caption.cref for caption in table.captions]
             footnote = [footnote.cref for footnote in table.footnotes]
             grid = [[cell.text if cell.text else '' for cell in row] for row in table.data.grid]
-            table_data = TableDataItem(
-                rows=table.data.num_rows,
-                columns=table.data.num_cols,
-                grid=grid,
-                caption=caption,
-                footnote=footnote
-            )
             table_items.append(
-                ChunkData(
+                TableDataItem(
                     type=ChunkType.TABLE,
                     name=f"#/tables/{len(table_items)}",
-                    content=table_data
+                    rows=table.data.num_rows,
+                    columns=table.data.num_cols,
+                    grid=grid,
+                    caption=caption,
+                    footnote=footnote
                 )
             )
 
@@ -208,7 +192,7 @@ class DocxDocumentParser(DocumentParser):
                 break
         return title if title else doc_data.name
 
-    def _extract_texts(self, texts:list[TitleItem|SectionHeaderItem|ListItem|CodeItem|FormulaItem|TextItem]) -> list[ChunkData]:
+    def _extract_texts(self, texts:list[TitleItem|SectionHeaderItem|ListItem|CodeItem|FormulaItem|TextItem]) -> tuple[list[TextDataItem], list[FormulaDataItem]]:
         """提取文档中的文本
 
         Args:
@@ -217,7 +201,8 @@ class DocxDocumentParser(DocumentParser):
         Returns:
             List[ChunkData]: 文本列表
         """
-        text_items: list[ChunkData] = []
+        text_items: list[TextDataItem] = []
+        formula_items: list[FormulaDataItem] = []
 
         for item in texts:
             if not hasattr(item, 'label'):
@@ -226,38 +211,36 @@ class DocxDocumentParser(DocumentParser):
                 continue
             match item.label:
                 case DocItemLabel.FORMULA:
-                    text_items.append(
-                        ChunkData(
+                    formula_items.append(
+                        FormulaDataItem(
                             type=ChunkType.FORMULA,
-                            name=f"formula-{len(text_items)}",
-                            content=FormulaDataItem(
-                                text=item.text
-                            )
+                            name=f"formula-{len(formula_items)}",
+                            text=item.text
                         )
                     )
+                case DocItemLabel.TITLE:
+                    continue
                 case _:
                     text_items.append(
-                        ChunkData(
+                        TextDataItem(
                             type=ChunkType.TEXT,
-                            name=f"#/texts/{len(text_items)}",
-                            content=TextDataItem(
-                                text=item.text
-                            )
+                            name=f"text-{len(text_items)}",
+                            text=item.text
                         )
                     )
-        return text_items
+        return text_items, formula_items
 
-    async def _extract_images_async(self, pictures: list[PictureItem]) -> list[ChunkData]:
+    async def _extract_images_async(self, pictures: list[PictureItem]) -> list[ImageDataItem]:
         """异步提取文档中的图片"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_event_loop() 
         return await loop.run_in_executor(None, self._extract_images, pictures)
 
-    async def _extract_tables_async(self, tables: list[TableItem]) -> list[ChunkData]:
+    async def _extract_tables_async(self, tables: list[TableItem]) -> list[TableDataItem]:
         """异步提取文档中的表格"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._extract_tables, tables)
 
-    async def _extract_texts_async(self, texts: list[TitleItem|SectionHeaderItem|ListItem|CodeItem|FormulaItem|TextItem]) -> list[ChunkData]:
+    async def _extract_texts_async(self, texts: list[TitleItem|SectionHeaderItem|ListItem|CodeItem|FormulaItem|TextItem]) -> tuple[list[TextDataItem], list[FormulaDataItem]]:
         """异步提取文档中的文本"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._extract_texts, texts)

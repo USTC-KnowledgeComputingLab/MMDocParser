@@ -4,9 +4,7 @@ from typing import Any
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
-
-from parsers.base_models import ChunkData
-
+from parsers.base_models import DataItem
 MAX_RETRIES = 3
 WAIT_TIME = 4
 WAIT_MAX_TIME = 15
@@ -24,7 +22,7 @@ class InformationEnhancer(ABC):
         self.system_prompt = "You are a helpful assistant."
 
     @abstractmethod
-    async def enhance(self, information: ChunkData) -> ChunkData:
+    async def enhance(self, information: DataItem) -> DataItem:
         """增强信息"""
         pass
 

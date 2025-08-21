@@ -16,7 +16,12 @@ class ChunkType(str, Enum):
     TABLE = "table"
     FORMULA = "formula"
 
-class TableDataItem(BaseModel):
+class DataItem(BaseModel):
+    """数据项基类"""
+    type: str|None = None  # 数据项类型
+    name: str|None = None  # 数据项名称
+
+class TableDataItem(DataItem):
     """表格数据类"""
     rows: int  # 行数
     columns: int  # 列数
@@ -26,39 +31,35 @@ class TableDataItem(BaseModel):
     data: list[list[str]] = Field(default_factory=list)  # 数据
     caption: list[str] = Field(default_factory=list)  # 表格标题
     footnote: list[str] = Field(default_factory=list)  # 表格注脚
+    description: str|None = None  # 表格描述
 
-class TextDataItem(BaseModel):
+class TextDataItem(DataItem):
     """文本数据类"""
     text: str  # 文本
     text_level: int|None = None  # 文本级别
 
-class ImageDataItem(BaseModel):
+class ImageDataItem(DataItem):
     """图片数据类"""
     uri: str|None = None  # 图片 URI
     caption: list[str] = Field(default_factory=list)  # 图片标题
     footnote: list[str] = Field(default_factory=list)  # 图片注脚
+    description: str|None = None  # 图片描述
 
-class FormulaDataItem(BaseModel):
+class FormulaDataItem(DataItem):
     """公式数据类"""
     text: str  # 公式
     text_format: str|None = None  # 公式格式
-
-class ChunkData(BaseModel):
-    """块数据类"""
-    type: ChunkType
-    name: str|None = None
-    content: TableDataItem|TextDataItem|ImageDataItem|FormulaDataItem
-    description: str|None = None
+    description: str|None = None  # 公式描述
 
 class DocumentData(BaseModel):
     """解析结果类"""
     title: str|None = None
-    texts: list[ChunkData] = Field(default_factory=list)
-    tables: list[ChunkData] = Field(default_factory=list)
-    images: list[ChunkData] = Field(default_factory=list)
-    formulas: list[ChunkData] = Field(default_factory=list)
+    texts: list[TextDataItem] = Field(default_factory=list)
+    tables: list[TableDataItem] = Field(default_factory=list)
+    images: list[ImageDataItem] = Field(default_factory=list)
+    formulas: list[FormulaDataItem] = Field(default_factory=list)
     processing_time: float = 0
-    success: bool
+    success: bool = False
     error_message: str | None = None
 
 class DocumentParser(ABC):

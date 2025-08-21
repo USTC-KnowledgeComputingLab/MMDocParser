@@ -31,7 +31,6 @@ from mineru.data.data_reader_writer import FileBasedDataWriter  # type: ignore
 from mineru.utils.enum_class import MakeMode  # type: ignore
 
 from parsers.base_models import (
-    ChunkData,
     ChunkType,
     DocumentData,
     DocumentParser,
@@ -89,10 +88,10 @@ class PdfDocumentParser(DocumentParser):
         # 创建任务列表
         tasks = []
         title = file_path.stem
-        texts_chunks: list[ChunkData] = []
-        tables_chunks: list[ChunkData] = []
-        images_chunks: list[ChunkData] = []
-        formulas_chunks: list[ChunkData] = []
+        texts_chunks: list[TextDataItem] = []
+        tables_chunks: list[TableDataItem] = []
+        images_chunks: list[ImageDataItem] = []
+        formulas_chunks: list[FormulaDataItem] = []
 
         for idx, item in enumerate(content_list):
             if item["type"] == "image":
@@ -185,7 +184,7 @@ class PdfDocumentParser(DocumentParser):
             raise
         return list(content_list)
 
-    async def _process_image(self, idx:int,image:dict[str, Any]) -> ChunkData|None:
+    async def _process_image(self, idx:int,image:dict[str, Any]) -> ImageDataItem|None:
         if not image.get("img_path") or not os.path.exists(str(image.get("img_path"))):
             return None
         image_path = Path(str(image.get("img_path")))
@@ -201,33 +200,31 @@ class PdfDocumentParser(DocumentParser):
             elif ext == ".gif":
                 mime_type = "image/gif"
 
-            return ChunkData(
+            return ImageDataItem(
                 type=ChunkType.IMAGE,
                 name=f"#/pictures/{idx}",
-                content=ImageDataItem(
-                    uri=f"data:{mime_type};base64,{base64_data}",
-                    caption=image.get("img_caption", []),
-                    footnote=image.get("img_footnote", [])
-                )
+                uri=f"data:{mime_type};base64,{base64_data}",
+                caption=image.get("img_caption", []),
+                footnote=image.get("img_footnote", [])
             )
 
 
-    async def _process_table_async(self, idx:int, table:dict[str, Any]) -> ChunkData|None:
+    async def _process_table_async(self, idx:int, table:dict[str, Any]) -> TableDataItem|None:
         """异步处理表格（在线程池中执行）"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._process_table, idx, table)
 
-    async def _process_formula_async(self, idx:int, formula:dict[str, Any]) -> ChunkData|None:
+    async def _process_formula_async(self, idx:int, formula:dict[str, Any]) -> FormulaDataItem|None:
         """异步处理公式（在线程池中执行）"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._process_formula, idx, formula)
 
-    async def _process_text_async(self, idx:int, text:dict[str, Any]) -> ChunkData|None:
+    async def _process_text_async(self, idx:int, text:dict[str, Any]) -> TextDataItem|None:
         """异步处理文本（在线程池中执行）"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._process_text, idx, text)
 
-    def _process_table(self, idx:int,table:dict[str, Any]) -> ChunkData|None:
+    def _process_table(self, idx:int,table:dict[str, Any]) -> TableDataItem|None:
         """同步处理表格"""
         html_str = table.get("table_body", "")
         soup = BeautifulSoup(html_str, 'html.parser')
@@ -292,34 +289,34 @@ class PdfDocumentParser(DocumentParser):
             caption=table.get("table_caption", []),
             footnote=table.get("table_footnote", [])
         )
-        return ChunkData(
+        return TableDataItem(
             type=ChunkType.TABLE,
             name=f"#/tables/{idx}",
-            content=table_data
+            rows=table_data.rows,
+            columns=table_data.columns,
+            grid=table_data.grid,
+            caption=table_data.caption,
+            footnote=table_data.footnote
         )
 
-    def _process_formula(self, idx:int,formula:dict[str, Any]) -> ChunkData|None:
+    def _process_formula(self, idx:int,formula:dict[str, Any]) -> FormulaDataItem|None:
         """同步处理公式"""
         if not formula.get("text") or formula.get("text") == "":
             return None
-        return ChunkData(
+        return FormulaDataItem(
             type=ChunkType.FORMULA,
             name=f"#/formulas/{idx}",
-            content=FormulaDataItem(
-                text=str(formula.get("text")),
-                text_format=formula.get("text_format")
-            )
+            text=str(formula.get("text")),
+            text_format=formula.get("text_format")
         )
 
-    def _process_text(self, idx:int,text:dict[str, Any]) -> ChunkData|None:
+    def _process_text(self, idx:int,text:dict[str, Any]) -> TextDataItem|None:
         """同步处理文本"""
         if not text.get("text") or text.get("text") == "":
             return None
-        return ChunkData(
+        return TextDataItem(
             type=ChunkType.TEXT,
             name=f"#/texts/{idx}",
-            content=TextDataItem(
-                text=str(text.get("text")),
-                text_level=int(text.get("text_level", 0))
-            )
+            text=str(text.get("text")),
+            text_level=int(text.get("text_level", 0))
         )
