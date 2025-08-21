@@ -5,8 +5,10 @@ Excel文件解析器模块
 包括表格数据提取和图片处理。
 """
 
+import asyncio
 import base64
 import json
+import logging
 import time
 import warnings
 from dataclasses import dataclass
@@ -37,6 +39,7 @@ warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 CellValue = str|int|float|bool|None|datetime|date
 TableData = list[list[CellValue]]
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ExcelParseConfig:
@@ -79,53 +82,88 @@ class ExcelParser(DocumentParser):
 
         try:
             # 初始化内容列表和图片列表
-            texts: list[ChunkData] = []
-            tables: list[ChunkData] = []
-            images: list[ChunkData] = []
 
             # 加载工作簿
             workbook = self._load_workbook(file_path)
 
-            # 处理每个工作表
-            for sheet_index, sheet_name in enumerate(workbook.sheetnames):
-                sheet = workbook[sheet_name]
+            # 并行处理每个工作表
+            document_data = await self._process_sheets_parallel(workbook, file_path)
 
-                # 添加工作表标题
-                texts.append(ChunkData(
-                    type=ChunkType.TEXT,
-                    name=sheet_name,
-                    content=TextDataItem(
-                        text=f"工作表 {sheet_index + 1}: {sheet_name}",
-                    ),
-                ))
-
-                # 处理图片
-                sheet_images = self._extract_sheet_images(sheet)
-                images.extend(sheet_images)
-
-                # 处理表格数据
-                table_content = self._extract_table_data(sheet)
-                tables.append(ChunkData(
-                    type=ChunkType.TABLE,
-                    name=f"#/tables/{sheet_index}",
-                    content=table_content
-                ))
             processing_time = time.time() - start_time
-            return DocumentData(
-                title=Path(file_path).stem,
-                texts=texts,
-                tables=tables,
-                images=images,
-                processing_time=processing_time,
-                success=True
-            )
+            document_data.processing_time = processing_time
+            return document_data
         except Exception as e:
-            processing_time = time.time() - start_time
-            return DocumentData(
-                success=False,
-                error_message=str(e),
-                processing_time=processing_time
-            )
+            raise Exception(f"Failed to parse Excel file {file_path}: {type(e).__name__}: {e}") from e
+
+    async def _process_sheets_parallel(self, workbook: Workbook, file_path: Path) -> DocumentData:
+        """并行处理所有工作表"""
+        # 创建任务列表
+        tasks = []
+
+        for sheet_index, sheet_name in enumerate(workbook.sheetnames):
+            sheet = workbook[sheet_name]
+            tasks.append(self._process_sheet_async(sheet, sheet_index, sheet_name))
+
+        # 并行执行所有工作表处理任务
+        if tasks:
+            results = await asyncio.gather(*tasks)
+
+            # 合并结果
+            texts: list[ChunkData] = []
+            tables: list[ChunkData] = []
+            images: list[ChunkData] = []
+
+            for result in results:
+                if result:
+                    texts.extend(result.get('texts', []))
+                    tables.extend(result.get('tables', []))
+                    images.extend(result.get('images', []))
+
+        return DocumentData(
+            title=Path(file_path).stem,
+            texts=texts,
+            tables=tables,
+            images=images,
+            success=True
+        )
+
+    async def _process_sheet_async(self, sheet: Worksheet, sheet_index: int, sheet_name: str) -> dict|None:
+        """异步处理单个工作表"""
+        try:
+            loop = asyncio.get_event_loop()
+
+            # 并行处理图片和表格
+            image_task = loop.run_in_executor(None, self._extract_sheet_images, sheet)
+            table_task = loop.run_in_executor(None, self._extract_table_data, sheet)
+
+            # 等待两个任务完成
+            sheet_images, table_content = await asyncio.gather(image_task, table_task)
+
+            # 添加工作表标题
+            texts = [ChunkData(
+                type=ChunkType.TEXT,
+                name=sheet_name,
+                content=TextDataItem(
+                    text=f"工作表 {sheet_index + 1}: {sheet_name}",
+                ),
+            )]
+
+            # 创建表格数据
+            tables = [ChunkData(
+                type=ChunkType.TABLE,
+                name=f"#/tables/{sheet_index}",
+                content=table_content
+            )] if table_content else []
+
+            return {
+                'texts': texts,
+                'tables': tables,
+                'images': sheet_images
+            }
+
+        except Exception as e:
+            logger.error(f"Error processing sheet {sheet_name}: {e}")
+            return None
 
     def _load_workbook(self, excel_path: Path) -> Workbook:
         """

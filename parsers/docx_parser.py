@@ -74,31 +74,64 @@ class DocxDocumentParser(DocumentParser):
             result = await loop.run_in_executor(None, self._converter.convert, file_path)
             doc_data = result.document
 
-            title = self._extract_title(doc_data)
-            images = self._extract_images(doc_data.pictures)
-            tables = self._extract_tables(doc_data.tables)
-            texts = self._extract_texts(doc_data.texts)
+            # 并行处理不同类型的内容
+            document_data = await self._process_content_parallel(doc_data)
 
             processing_time = time.time() - start_time
+            document_data.processing_time = processing_time
             logger.info(f"Successfully parsed DOCX: {file_path} (took {processing_time:.2f}s)")
-            return DocumentData(
-                title=title,
-                texts=texts,
-                tables=tables,
-                images=images,
-                processing_time=processing_time,
-                success=True
-            )
+            return document_data
 
         except Exception as e:
-            processing_time = time.time() - start_time
-            error_msg = f"Failed to parse DOCX file {file_path}: {type(e).__name__}: {e}"
-            logger.exception(error_msg)  # 记录完整堆栈
-            return DocumentData(
-                success=False,
-                error_message=str(e),
-                processing_time=processing_time
-            )
+            raise Exception(f"Failed to parse DOCX file {file_path}") from e
+
+    async def _process_content_parallel(self, doc_data: DoclingDocument) -> DocumentData:
+        """并行处理文档内容"""
+        # 创建任务列表
+        tasks = []
+
+        # 添加图片处理任务
+        if doc_data.pictures:
+            tasks.append(self._extract_images_async(doc_data.pictures))
+
+        # 添加表格处理任务
+        if doc_data.tables:
+            tasks.append(self._extract_tables_async(doc_data.tables))
+
+        # 添加文本处理任务
+        if doc_data.texts:
+            tasks.append(self._extract_texts_async(doc_data.texts))
+
+        # 并行执行所有任务
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 处理结果
+        images: list[ChunkData] = []
+        tables: list[ChunkData] = []
+        texts: list[ChunkData] = []
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Error processing content type {i}: {result}")
+                continue
+            if isinstance(result, list):
+                if result and result[0].type == ChunkType.IMAGE:
+                    images = result
+                elif result and result[0].type == ChunkType.TABLE:
+                    tables = result
+                elif result and result[0].type == ChunkType.TEXT:
+                    texts = result
+
+        # 提取标题
+        title = self._extract_title(doc_data)
+
+        return DocumentData(
+            title=title,
+            texts=texts,
+            tables=tables,
+            images=images,
+            success=True
+        )
 
     def _extract_images(self, pictures: list[PictureItem]) -> list[ChunkData]:
         """提取文档中的图片
@@ -213,3 +246,18 @@ class DocxDocumentParser(DocumentParser):
                         )
                     )
         return text_items
+
+    async def _extract_images_async(self, pictures: list[PictureItem]) -> list[ChunkData]:
+        """异步提取文档中的图片"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._extract_images, pictures)
+
+    async def _extract_tables_async(self, tables: list[TableItem]) -> list[ChunkData]:
+        """异步提取文档中的表格"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._extract_tables, tables)
+
+    async def _extract_texts_async(self, texts: list[TitleItem|SectionHeaderItem|ListItem|CodeItem|FormulaItem|TextItem]) -> list[ChunkData]:
+        """异步提取文档中的文本"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._extract_texts, texts)
