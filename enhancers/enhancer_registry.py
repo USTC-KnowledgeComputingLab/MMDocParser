@@ -38,12 +38,12 @@ def register_enhancer(modalities: list[ChunkType]) -> Callable[[type[Information
 
         # 注册到全局注册表
         for modality in modalities:
-            modality = modality.value.lower()  # 统一转换为小写
-            if modality in ENHANCER_REGISTRY:
-                logger.error(f"覆盖已存在的信息增强器: {modality} -> {cls.__name__}")
-                raise ValueError(f"尝试覆盖已存在的信息增强器: {modality} -> {cls.__name__}")
-            ENHANCER_REGISTRY[modality] = cls
-            logger.info(f"注册信息增强器: {modality} -> {cls.__name__}")
+            modality_type = modality.value.lower()  # 统一转换为小写
+            if modality_type in ENHANCER_REGISTRY:
+                logger.error(f"覆盖已存在的信息增强器: {modality_type} -> {cls.__name__}")
+                raise ValueError(f"尝试覆盖已存在的信息增强器: {modality_type} -> {cls.__name__}")
+            ENHANCER_REGISTRY[modality_type] = cls
+            logger.info(f"注册信息增强器: {modality_type} -> {cls.__name__}")
 
         return cls
 
