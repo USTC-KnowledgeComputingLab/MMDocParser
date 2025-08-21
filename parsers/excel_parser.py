@@ -24,9 +24,9 @@ from parsers.base_models import (
     ChunkType,
     DocumentData,
     DocumentParser,
+    ImageDataItem,
     TableDataItem,
     TextDataItem,
-    ImageDataItem
 )
 from parsers.parser_registry import register_parser
 

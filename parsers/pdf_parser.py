@@ -6,40 +6,40 @@ PDF文档解析器模块
 """
 
 import asyncio
-from typing import Any, LiteralString
-import logging
-import time
+import base64
+import os
 import re
 import shutil
-import os
-import base64
-import json
-import shutil
+import time
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
-from loguru import logger
-from bs4 import BeautifulSoup
+from typing import Any
 
-from mineru.cli.common import prepare_env, read_fn
-from mineru.backend.pipeline.pipeline_analyze import doc_analyze as pipeline_doc_analyze
-from mineru.backend.pipeline.model_json_to_middle_json import result_to_middle_json as pipeline_result_to_middle_json
-from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
-from mineru.utils.enum_class import MakeMode
-from mineru.data.data_reader_writer import FileBasedDataWriter
+from bs4 import BeautifulSoup
+from loguru import logger
+from mineru.backend.pipeline.model_json_to_middle_json import (
+    result_to_middle_json as pipeline_result_to_middle_json,  # type: ignore
+)
+from mineru.backend.pipeline.pipeline_analyze import (
+    doc_analyze as pipeline_doc_analyze,  # type: ignore
+)
+from mineru.backend.pipeline.pipeline_middle_json_mkcontent import (
+    union_make as pipeline_union_make,  # type: ignore
+)
+from mineru.cli.common import prepare_env, read_fn  # type: ignore
+from mineru.data.data_reader_writer import FileBasedDataWriter  # type: ignore
+from mineru.utils.enum_class import MakeMode  # type: ignore
 
 from parsers.base_models import (
     ChunkData,
     ChunkType,
     DocumentData,
     DocumentParser,
-    TableDataItem,
+    FormulaDataItem,
     ImageDataItem,
+    TableDataItem,
     TextDataItem,
-    FormulaDataItem
 )
 from parsers.parser_registry import register_parser
-
-logger = logging.getLogger(__name__)
 
 
 @register_parser(['.pdf'])
@@ -72,23 +72,31 @@ class PdfDocumentParser(DocumentParser):
             local_image_dir, _ = prepare_env(self.output_dir, pdf_file_name, self.parse_method)
             loop = asyncio.get_event_loop()
             content_list = await loop.run_in_executor(
-                None, 
+                None,
                 self._parse_pdf_to_content_list,
                 file_path, local_image_dir, self.lang, self.parse_method, self.formula_enable, self.table_enable
             )
             for idx, item in enumerate(content_list):
                 if item["type"] == "image":
-                    images_chunks.append(self._process_image(idx, item))
+                    image_chunk = self._process_image(idx, item)
+                    if image_chunk:
+                        images_chunks.append(image_chunk)
                 elif item["type"] == "table":
-                    tables_chunks.append(self._process_table(idx, item))
+                    table_chunk = self._process_table(idx, item)
+                    if table_chunk:
+                        tables_chunks.append(table_chunk)
                 elif item["type"] == "equation":
-                    formulas_chunks.append(self._process_formula(idx, item))
+                    formula_chunk = self._process_formula(idx, item)
+                    if formula_chunk:
+                        formulas_chunks.append(formula_chunk)
                 elif item["type"] == "text":
                     if item.get("text_level") == 1:
                         title = item.get("text", "")
                         continue
-                    texts_chunks.append(self._process_text(idx, item))
-            
+                    text_chunk = self._process_text(idx, item)
+                    if text_chunk:
+                        texts_chunks.append(text_chunk)
+
             shutil.rmtree(local_image_dir, ignore_errors=True)
             processing_time = time.time() - start_time
             logger.info(f"Successfully parsed DOCX: {file_path} (took {processing_time:.2f}s)")
@@ -120,7 +128,7 @@ class PdfDocumentParser(DocumentParser):
         parse_method: str = "auto",
         formula_enable: bool = True,
         table_enable: bool = True,
-    ) -> LiteralString|list[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
 
         # 1. 读取 PDF bytes
         try:
@@ -162,10 +170,12 @@ class PdfDocumentParser(DocumentParser):
         except Exception as e:
             logger.error(f"Failed in pipeline_union_make: {e}")
             raise
-        return content_list
+        return list(content_list)
 
-    def _process_image(self, idx:int,image:dict[str, Any]) -> ChunkData:
-        image_path = Path(image.get("img_path"))
+    def _process_image(self, idx:int,image:dict[str, Any]) -> ChunkData|None:
+        if not image.get("img_path") or not os.path.exists(str(image.get("img_path"))):
+            return None
+        image_path = Path(str(image.get("img_path")))
         with open(image_path, "rb") as img_file:
             img_data = img_file.read()
             base64_data = base64.b64encode(img_data).decode("utf-8")
@@ -185,18 +195,20 @@ class PdfDocumentParser(DocumentParser):
             )
         )
 
-    def _process_table(self, idx:int,table:dict[str, Any]) -> ChunkData:
+    def _process_table(self, idx:int,table:dict[str, Any]) -> ChunkData|None:
         html_str = table.get("table_body", "")
         soup = BeautifulSoup(html_str, 'html.parser')
         table_body = soup.find('table')
+        if not table_body:
+            return None
         # 使用网格处理 rowspan 和 colspan
-        grid = []
+        grid: list[list[str]] = []
         max_col = 0
 
-        for row_idx, tr in enumerate(table_body.find_all('tr')):
+        for row_idx, tr in enumerate(table_body.find_all('tr')): # type: ignore
             while len(grid) <= row_idx:
                 grid.append([])
-            current_row = grid[row_idx]
+            current_row: list[str] = grid[row_idx]
             col_idx = 0
 
             # 跳过被 rowspan 占据的位置
@@ -218,7 +230,7 @@ class PdfDocumentParser(DocumentParser):
 
                 # 扩展行
                 while len(current_row) < col_idx + colspan:
-                    current_row.append(None)
+                    current_row.append("")
 
                 # 填入内容
                 for r in range(rowspan):
@@ -227,7 +239,7 @@ class PdfDocumentParser(DocumentParser):
                         grid.append([])
                     actual_row = grid[actual_row_idx]
                     while len(actual_row) < col_idx + colspan:
-                        actual_row.append(None)
+                        actual_row.append("")
                     for c in range(colspan):
                         actual_row[col_idx + c] = text
 
@@ -254,51 +266,26 @@ class PdfDocumentParser(DocumentParser):
         )
 
 
-    def _process_formula(self, idx:int,formula:dict[str, Any]) -> ChunkData:
+    def _process_formula(self, idx:int,formula:dict[str, Any]) -> ChunkData|None:
+        if not formula.get("text") or formula.get("text") == "":
+            return None
         return ChunkData(
             type=ChunkType.FORMULA,
             name=f"#/formulas/{idx}",
             content=FormulaDataItem(
-                text=formula.get("text", ""),
-                text_format=formula.get("text_format", "")
+                text=str(formula.get("text")),
+                text_format=formula.get("text_format")
             )
         )
 
-    def _process_text(self, idx:int,text:dict[str, Any]) -> ChunkData:
+    def _process_text(self, idx:int,text:dict[str, Any]) -> ChunkData|None:
+        if not text.get("text") or text.get("text") == "":
+            return None
         return ChunkData(
             type=ChunkType.TEXT,
             name=f"#/texts/{idx}",
             content=TextDataItem(
-                text=text.get("text", ""),
-                text_level=text.get("text_level", None)
+                text=str(text.get("text")),
+                text_level=int(text.get("text_level", 0))
             )
         )
-
-# ==================== 使用示例 ====================
-
-if __name__ == "__main__":
-    import asyncio
-    # 参数设置
-    __dir__ = Path(__file__).parent
-    pdf_path = Path(__file__).parent.parent / "examples" /"data"/ "1.pdf"  # 替换为你的 PDF 文件
-    output_dir = __dir__ / "output"
-    output_dir.mkdir(exist_ok=True)
-
-    # 解析并获取 content_list
-    try:
-        content_list = asyncio.run(PdfDocumentParser().parse(
-            file_path=pdf_path
-        ))
-
-        # 打印结果（四种模态）
-        print(content_list.title)
-        print(content_list.tables)
-        print(content_list.texts)
-        print(len(content_list.images))
-        print(content_list.formulas)
-
-        # 如果你想查看完整结构
-        # print(json.dumps(content_list, ensure_ascii=False, indent=2))
-
-    except Exception as e:
-        logger.exception("Failed to parse PDF")

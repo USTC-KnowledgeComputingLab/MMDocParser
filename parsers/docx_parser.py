@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+
 from docling.datamodel.base_models import InputFormat
 from docling.document_converter import DocumentConverter, WordFormatOption
 from docling.pipeline.simple_pipeline import SimplePipeline
@@ -30,10 +31,10 @@ from parsers.base_models import (
     ChunkType,
     DocumentData,
     DocumentParser,
-    TableDataItem,
+    FormulaDataItem,
     ImageDataItem,
+    TableDataItem,
     TextDataItem,
-    FormulaDataItem
 )
 from parsers.parser_registry import register_parser
 
@@ -108,8 +109,10 @@ class DocxDocumentParser(DocumentParser):
         Returns:
             List[ChunkData]: 图片列表
         """
-        image_items = []
+        image_items: list[ChunkData] = []
         for idx, picture in enumerate(pictures):
+            if not picture.image:
+                continue
             image_uri = str(picture.image.uri)
             caption = [caption.cref for caption in picture.captions]
             footnote = [footnote.cref for footnote in picture.footnotes]
