@@ -7,8 +7,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 
 from parsers.excel_parser import ExcelParser
-from parsers.base_models import ChunkData
-
+from parsers.base_models import TableDataItem
 
 @pytest.mark.asyncio
 async def test_parse_real_basic_and_image():
@@ -60,7 +59,7 @@ async def test_parse_real_basic_and_image():
             assert result.texts[0].type == "text" and result.texts[0].name == "Sheet1"
             assert result.images[0].type == "image"
             assert result.images[0].name == "#/pictures/0"
-            assert result.images[0].content.uri.startswith("data:image/")
+            assert result.images[0].uri.startswith("data:image/")
 
             assert result.tables[0].type == "table"
             assert result.texts[1].type == "text" and result.texts[1].name == "Sheet2"
@@ -100,13 +99,12 @@ async def test_parse_real_merged_cells():
         assert len(result.texts) == 1
 
         # 表格在索引1
-        table_chunk: ChunkData = result.tables[0]
+        table_chunk: TableDataItem = result.tables[0]
         assert table_chunk.type == "table"
 
-        payload = table_chunk.content
-        assert payload.grid == [["Merged Header", "Merged Header"], ["Value1", "Value2"]]
-        assert payload.rows == 2
-        assert payload.columns == 2
+        assert table_chunk.grid == [["Merged Header", "Merged Header"], ["Value1", "Value2"]]
+        assert table_chunk.rows == 2
+        assert table_chunk.columns == 2
     finally:
         os.remove(xlsx_path)
 
