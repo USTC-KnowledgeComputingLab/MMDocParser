@@ -2,9 +2,12 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from openai import AsyncOpenAI
+from openai.types.chat import ParsedChatCompletionMessage
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
+
 from parsers.base_models import DataItem
+
 MAX_RETRIES = 3
 WAIT_TIME = 4
 WAIT_MAX_TIME = 15
@@ -27,7 +30,7 @@ class InformationEnhancer(ABC):
         pass
 
     @retry(stop=stop_after_attempt(MAX_RETRIES), wait=wait_exponential(multiplier=MULTIPLIER, min=WAIT_TIME, max=WAIT_MAX_TIME))
-    async def get_structured_response(self, user_prompt: list[dict[str, Any]], response_format: JsonResponseFormat) -> str|None:
+    async def get_structured_response(self, user_prompt: list[dict[str, Any]], response_format: JsonResponseFormat) -> ParsedChatCompletionMessage:
         """获取结构化响应"""
         response = await self.client.chat.completions.parse(
             model=self.model_name,
@@ -37,6 +40,4 @@ class InformationEnhancer(ABC):
             ],
             response_format=response_format # type: ignore
         )
-        if response.choices[0].message.refusal:
-            raise ValueError(f"模型拒绝了请求: {response.choices[0].message.refusal}")
-        return response.choices[0].message.parsed
+        return response.choices[0].message

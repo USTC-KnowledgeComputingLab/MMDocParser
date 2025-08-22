@@ -232,7 +232,7 @@ class DocxDocumentParser(DocumentParser):
 
     async def _extract_images_async(self, pictures: list[PictureItem]) -> list[ImageDataItem]:
         """异步提取文档中的图片"""
-        loop = asyncio.get_event_loop() 
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._extract_images, pictures)
 
     async def _extract_tables_async(self, tables: list[TableItem]) -> list[TableDataItem]:

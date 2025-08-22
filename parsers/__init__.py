@@ -1,6 +1,14 @@
 # Parsers package
 
-from .base_models import ChunkType, DocumentData, DocumentParser, TableDataItem, TextDataItem, ImageDataItem, FormulaDataItem
+from .base_models import (
+    ChunkType,
+    DocumentData,
+    DocumentParser,
+    FormulaDataItem,
+    ImageDataItem,
+    TableDataItem,
+    TextDataItem,
+)
 from .parser_registry import (
     PARSER_REGISTRY,
     get_parser,

@@ -105,7 +105,7 @@ class PdfDocumentParser(DocumentParser):
                     continue
                 texts_task.append(self._process_text_async(idx, item))
 
-        
+
         texts_chunks = [item for item in (await asyncio.gather(*texts_task) if texts_task else []) if item is not None]
         tables_chunks = [item for item in (await asyncio.gather(*tables_task) if tables_task else []) if item is not None]
         images_chunks = [item for item in (await asyncio.gather(*images_task) if images_task else []) if item is not None]
