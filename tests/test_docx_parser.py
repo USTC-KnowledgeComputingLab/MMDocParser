@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch, AsyncMock
 from pathlib import Path
 
 from parsers.docx_parser import DocxDocumentParser
-from parsers.base_models import DocumentData, ChunkData, ChunkType, TableDataItem
+from parsers.base_models import ChunkType, TableDataItem, TextDataItem, FormulaDataItem, ImageDataItem
 
 
 class TestDocxDocumentParserParse:
@@ -90,27 +90,27 @@ class TestDocxDocumentParserParse:
             assert result.error_message is None
             
             # 验证文本内容
-            assert len(result.texts) == 3  # 标题不算在texts中
+            assert len(result.texts) == 1  # 标题不算在texts中
+            assert result.title == "文档标题"
             assert result.texts[0].type == ChunkType.TEXT
-            assert result.texts[0].content.text == "文档标题"
-            assert result.texts[1].type == ChunkType.TEXT
-            assert result.texts[1].content.text == "这是正文内容"
-            assert result.texts[2].type == ChunkType.FORMULA
-            assert result.texts[2].content.text == "E = mc²"
+            assert result.texts[0].text == "这是正文内容"
+            assert result.formulas[0].text == "E = mc²"
+            assert result.formulas[0].type == ChunkType.FORMULA
+
+
             
             # 验证表格
             assert len(result.tables) == 1
             assert result.tables[0].type == ChunkType.TABLE
-            assert isinstance(result.tables[0].content, TableDataItem)
-            assert result.tables[0].content.rows == 2
-            assert result.tables[0].content.columns == 3
+            assert result.tables[0].rows == 2
+            assert result.tables[0].columns == 3
             
             # 验证图片
             assert len(result.images) == 1
             assert result.images[0].type == ChunkType.IMAGE
-            assert result.images[0].content.uri == "/path/to/image.jpg"
-            assert result.images[0].content.caption == ["图片说明"]
-            assert result.images[0].content.footnote == []
+            assert result.images[0].uri == "/path/to/image.jpg"
+            assert result.images[0].caption == ["图片说明"]
+            assert result.images[0].footnote == []
 
     @pytest.mark.asyncio
     async def test_parse_without_title(self, parser):
@@ -225,7 +225,7 @@ class TestDocxDocumentParserParse:
             assert result.success is True
             assert len(result.tables) == 1
             
-            table = result.tables[0].content
+            table = result.tables[0]
             assert table.rows == 3
             assert table.columns == 4
             assert table.grid == [["姓名", "年龄", "职业", "薪资"], ["张三", "25", "工程师", "15000"], ["李四", "30", "设计师", "18000"]]
@@ -266,9 +266,9 @@ class TestDocxDocumentParserParse:
             
             for i, img in enumerate(result.images):
                 assert img.type == ChunkType.IMAGE
-                assert img.content.uri == f"/path/to/image{i+1}.jpg"
-                assert img.content.caption == [f"图片{i+1}说明"]
-                assert img.content.footnote == []
+                assert img.uri == f"/path/to/image{i+1}.jpg"
+                assert img.caption == [f"图片{i+1}说明"]
+                assert img.footnote == []
 
     @pytest.mark.asyncio
     async def test_parse_with_section_headers(self, parser):
@@ -298,4 +298,4 @@ class TestDocxDocumentParserParse:
             assert result.success is True
             assert len(result.texts) == 1
             assert result.texts[0].type == ChunkType.TEXT
-            assert result.texts[0].content.text == "第一章 引言"
+            assert result.texts[0].text == "第一章 引言"
